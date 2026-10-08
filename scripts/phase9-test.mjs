@@ -248,6 +248,13 @@ await A.page.evaluate(() => window.__fw.host.leave());
 await waitSim(B, 3);
 await A.page.close();
 const A2 = await open('A2', `char=Mason${run}&el=earth&fac=sentinel`, A.ctx);
+// Headless with four tabs, a fresh tab can stall long enough for the shard to drop it; it rejoins
+// by itself (checked below with C). Let it settle online before going on.
+const settled = () => A2.page.evaluate(() => window.__fw.host.online && window.__fw.host.connected);
+await until(A2, () => window.__fw.host.online && window.__fw.host.connected, null, 120000).catch(() => {});
+await waitSim(A2, 5);
+await until(A2, () => window.__fw.host.online && window.__fw.host.connected, null, 120000).catch(() => {});
+if (!(await settled())) console.log('  A2 is not back online');
 await until(A2, () => window.__fw.host.camps.campfireOf(window.__fw.host.charId), null, 30000).catch(() => {});
 ok((await myPieces(A2)).length === 3, 'after a reload the camp is still there (3 pieces)');
 const sorted = (o) => JSON.stringify(Object.entries(o).sort());
@@ -256,11 +263,11 @@ ok(sorted(await inv(A2)) === sorted(invBefore), `the bag is saved (${JSON.string
 // Take the wall down: it disappears for everyone, half the cost comes back.
 await goTo(A2, W.x + 2, W.z + 1);
 await A2.page.keyboard.press('KeyB');
-await A2.page.waitForSelector(`.camp:not(.hidden) [data-remove="${W.id}"]`, { timeout: 20000 }).catch(() => {});
+const removeBtn = await A2.page.waitForSelector(`.camp:not(.hidden) [data-remove="${W.id}"]`, { timeout: 20000 }).then(() => true, () => false);
 const w0 = (await inv(A2)).wood ?? 0;
 await A2.page.click(`.camp [data-remove="${W.id}"]`).catch(() => {});
 await until(C, (id) => !window.__fw.host.camps.all.has(id), W.id, 20000).catch(() => {});
-ok(!(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id)), 'taking a piece down removes it for everyone');
+ok(!(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id)), `taking a piece down removes it for everyone${removeBtn ? '' : ` (no remove button; A2 online: ${await settled()}, net: ${await A2.page.evaluate(() => window.__fw.netStatus)})`}`);
 await until(A2, (n) => (window.__fw.host.progress.inv.wood ?? 0) === n + 3, w0, 10000).catch(() => {});
 ok((await inv(A2)).wood === w0 + 3, 'half the cost is refunded');
 // A dropped connection (closed under the client, not a leave) plays on offline and rejoins by itself.
