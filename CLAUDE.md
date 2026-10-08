@@ -192,7 +192,9 @@ docs/DESIGN.md       game design (keep in sync)
   bounds and answers `correct` when it rejects one. Blocking start is stamped server-side so perfect blocks are
   authoritative. Knockback/pull come back as `imp`; nearby events as `ev`. Each client's StateView holds
   entities within 3 chunks and drops them past 4. Dev servers accept a `tp` message (tests, free cam);
-  production (`NODE_ENV=production`) does not.
+  production (`NODE_ENV=production`) does not. The shard drops a client that misses `pingMaxRetries` pings
+  (`net.json`); a client whose connection closes without `leave()` plays on with `LocalCombat` and retries the same
+  shard (then any) after each of `reconnectDelaysMs`, snapping to the position the shard saved.
 - **Accounts**: `/api/guest` mints a guest account + session token (localStorage `fw.token`); register upgrades
   it in place. Joining a room requires `{token, characterId}`; `onAuth` checks both and allows one live session
   per character. Positions save on leave and every `saveEverySeconds`.

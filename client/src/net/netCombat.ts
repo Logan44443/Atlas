@@ -100,6 +100,8 @@ export class NetCombat implements CombatHost {
   corrections: CorrectMsg[] = [];
   notices: Array<{ text: string; warn?: boolean }> = [];
   onClose: ((code: number) => void) | null = null;
+  /** True once this tab chose to leave (switching character, tests): no reconnecting then. */
+  left = false;
   progress: Progress = newProgress();
   readonly xpLog: XpGain[] = [];
   party: PartyInfo | null = null;
@@ -196,6 +198,7 @@ export class NetCombat implements CombatHost {
 
   leave(): void {
     this.closed = true;
+    this.left = true;
     this.room.leave();
   }
 

@@ -3,7 +3,8 @@
 // panel and the placement ghost, stores items in a chest, makes refined ore at
 // an ore vein (channel key) and mud with a waterbender ally; an outlaw
 // firebender can't hurt the camp outside the raid window but can during it
-// (forced with the dev-only `dev:raid`). The camp and bag survive a reload.
+// (forced with the dev-only `dev:raid`). The camp and bag survive a reload, and a dropped
+// connection rejoins by itself.
 // Offline: a camp saves in the browser and you respawn at your campfire.
 // Needs `npm run server` and `npm run dev`.
 //   node scripts/phase9-test.mjs [url]
@@ -262,8 +263,13 @@ await until(C, (id) => !window.__fw.host.camps.all.has(id), W.id, 20000).catch((
 ok(!(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id)), 'taking a piece down removes it for everyone');
 await until(A2, (n) => (window.__fw.host.progress.inv.wood ?? 0) === n + 3, w0, 10000).catch(() => {});
 ok((await inv(A2)).wood === w0 + 3, 'half the cost is refunded');
+// A dropped connection (closed under the client, not a leave) plays on offline and rejoins by itself.
+const cId = await C.page.evaluate(() => window.__fw.host.me.id);
+await C.page.evaluate(() => window.__fw.host.room.connection.close(4100, 'test drop'));
+await until(C, (id) => window.__fw.host.online && window.__fw.host.me.id !== id, cId, 90000).catch(() => {});
+ok(await C.page.evaluate((id) => window.__fw.host.online && window.__fw.host.me.id !== id, cId), 'a dropped connection rejoins the shard by itself');
 // Leave the world as we found it so later runs find free sites.
-await A2.page.evaluate(() => window.__fw.host.devClearCamp());
+await A2.page.evaluate(() => window.__fw.host.devClearCamp?.());
 await until(C, () => !window.__fw.host.camps.all.size, null, 20000).catch(() => {});
 for (const p of [A2, B, C]) ok(p.errors.length === 0, `${p.label}: no page errors${p.errors.length ? `: ${p.errors.slice(0, 3).join(' | ')}` : ''}`);
 for (const ctx of new Set([A.ctx, B.ctx, C.ctx])) await ctx.close();

@@ -29,6 +29,7 @@ import { CFG, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import characterData from '@data/character.json';
 import { elementContextAt, worldDays } from '@shared/clock';
 import { NetCombat, defaultServerUrl } from './net/netCombat';
+import { NET } from '@shared/net';
 import { RemotePlayers } from './game/remotePlayers';
 import { AccountClient, type Character } from './net/account';
 import type { ElementId } from '@shared/combat';
@@ -450,7 +451,49 @@ async function main() {
     abilities.setElement(settings.data.element);
     console.info(`[net] ${netStatus}`);
   }
-  if (host instanceof NetCombat) host.onClose = (code) => goOffline(`disconnected, code ${code}`);
+  // A dropped connection keeps you playing offline while it tries to rejoin (the same shard if it's still there).
+  let reconnecting = false;
+  async function reconnect(shard: string) {
+    if (reconnecting || !account.token) return;
+    reconnecting = true;
+    const opts = { token: account.token, characterId: character.id };
+    for (const wait of NET.reconnectDelaysMs) {
+      await new Promise((r) => setTimeout(r, wait));
+      try {
+        const net = await NetCombat.connect(defaultServerUrl(), opts, who, swimState, shard).catch(() =>
+          NetCombat.connect(defaultServerUrl(), opts, who, swimState, null),
+        );
+        goOnline(net);
+        reconnecting = false;
+        return;
+      } catch (err) {
+        netStatus = `offline (reconnecting: ${(err as Error)?.message ?? 'no server'})`;
+      }
+    }
+    reconnecting = false;
+    netStatus = 'offline (could not reconnect)';
+    console.info(`[net] ${netStatus}`);
+  }
+  function goOnline(net: NetCombat) {
+    host = net;
+    net.groundAt = groundAt;
+    structView.bind(net.camps);
+    setMount(null);
+    abilities.setElement(settings.data.element);
+    // The shard puts you back where it last saw you.
+    player.teleport(net.me.pos.x, net.me.pos.z);
+    watchClose(net);
+    netStatus = `shard ${net.shard}`;
+    console.info(`[net] rejoined ${netStatus} as ${net.me.id}`);
+  }
+  function watchClose(net: NetCombat) {
+    net.onClose = (code) => {
+      if (host !== net) return;
+      goOffline(`disconnected, code ${code}`);
+      if (!net.left) void reconnect(net.shard);
+    };
+  }
+  if (host instanceof NetCombat) watchClose(host);
   const netReady = Promise.resolve();
 
   // Offline characters remember where they were.

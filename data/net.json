@@ -10,6 +10,10 @@
   "interestRemoveChunks": 4,
   "eventRadiusMeters": 160,
   "connectTimeoutMs": 2500,
+  "_ping": "The shard pings every pingIntervalMs and drops a client that misses pingMaxRetries in a row (a tab busy building the world can be slow to answer). A dropped client keeps playing offline and tries to rejoin after each of reconnectDelaysMs.",
+  "pingIntervalMs": 3000,
+  "pingMaxRetries": 5,
+  "reconnectDelaysMs": [1000, 3000, 6000, 12000, 20000, 30000],
   "movement": {
     "speedTolerance": 1.35,
     "slackMeters": 1.5,
