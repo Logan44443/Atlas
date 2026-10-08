@@ -208,6 +208,8 @@ export class NetCombat implements CombatHost {
   }
   devClock(hours: number): void {
     if (!this.closed) this.room.send('dev:clock', hours);
+    // Resync the clock right away instead of at the next ping.
+    this.pingT = 0;
   }
 
   setMastery(alloc: Record<string, number>): void {

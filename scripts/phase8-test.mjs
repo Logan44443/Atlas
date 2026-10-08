@@ -34,7 +34,7 @@ async function open(label, query) {
   });
   const u = new URL(base);
   u.search = query;
-  await page.goto(u.toString());
+  await page.goto(u.toString(), { timeout: 120000 });
   await page.waitForSelector('#loading.done', { timeout: 240000 });
   await page.evaluate(() => {
     const f = window.__fw;
@@ -127,7 +127,7 @@ const night = () => w.page.evaluate(() => window.__fw.dayNight.nightFactor);
 // Find an hour shift that makes it day, then night.
 for (const shift of [0, 6, 12, 18]) {
   await w.page.evaluate((h) => window.__fw.host.devClock(h), shift);
-  await w.page.waitForTimeout(2500);
+  await w.page.waitForTimeout(5000);
   if ((await night()) < 0.2) break;
 }
 await w.page.evaluate(() => window.__fw.host.talkTo('master_blood'));
@@ -136,7 +136,7 @@ await w.page.waitForTimeout(1500);
 ok(!(await arts(w)).quests.blood, `by day (night ${(await night()).toFixed(2)}) the Pale Lady sends W away`);
 for (const shift of [12, 6, 18, 0]) {
   await w.page.evaluate((h) => window.__fw.host.devClock(h), shift);
-  await w.page.waitForTimeout(2500);
+  await w.page.waitForTimeout(5000);
   if ((await night()) > 0.7) break;
 }
 await w.page.evaluate(() => window.__fw.host.talkTo('master_blood'));
@@ -153,6 +153,8 @@ const wa2 = await arts(w);
 ok(wa2.learned.includes('healing') && wa2.equipped === 'healing' && wa2.quests.blood?.step === 1, 'after reload: Healing learned + equipped, Bloodbending quest kept');
 
 // ---------- Offline: the other arts ----------
+// SwiftShader is slow: close each page once its part is done.
+await w.ctx.close();
 // Fire: Lightning strikes a dummy in a line after charging.
 const f = await open('F', `offline&char=Kazan${run}&el=fire&fac=redfang`);
 await goTo(f, 0, -12);
@@ -165,6 +167,8 @@ const charges = await events(f, 'charge');
 const hp1 = await f.page.evaluate(() => window.__fw.host.entities.get('dummy_a').hp);
 ok(charges.length > 0 && beams.length > 0 && hp1 < hp0, `Lightning: charge ${charges[0]?.duration}s then beam, dummy ${hp0} -> ${hp1}`);
 await f.page.screenshot({ path: `${outDir}/p8-lightning.png` });
+
+await f.ctx.close();
 
 // Water: Healing restores health and cleanses burn.
 const h = await open('H', `offline&char=Kya${run}&el=water&fac=sentinel`);
@@ -179,6 +183,8 @@ await waitSim(h, 3.2);
 const hh = await h.page.evaluate(() => ({ hp: window.__fw.host.me.hp, burn: window.__fw.host.me.statuses.has('burn') }));
 ok(hh.hp > 100 && !hh.burn, `Healing: 60 -> ${hh.hp} hp, burn cleansed: ${!hh.burn}`);
 
+await h.ctx.close();
+
 // Earth: Metal cable drags a dummy; lava pool burns and cools into a wall.
 const e = await open('E', `offline&char=Toph${run}&el=earth&fac=sentinel`);
 // Stand 8 m from the dummy so the cable has a clear line (no terrain in between).
@@ -190,7 +196,8 @@ await until(e, () => window.__fw.__ev.some((x) => x.t === 'hit' && x.target === 
 const pulled = await e.page.evaluate(() => window.__fw.__ev.filter((x) => x.t === 'impulse' && x.target === 'dummy_a').map((x) => x.v));
 ok(pulled.length > 0 && pulled[0][2] < 0, `Metal cable hit dummy_a and pulled it toward the caster (impulse z ${pulled[0]?.[2]?.toFixed(1)})`);
 await e.page.evaluate(() => window.__fw.host.equipArt('lava'));
-await waitSim(e, 0.5);
+// The Art slot keeps its cooldown when you swap arts (no swap-to-reset).
+await waitSim(e, 8.5);
 await castArt(e, 'dummy_b');
 await until(e, () => window.__fw.__ev.some((x) => x.t === 'area' && x.ability === 'lava'), null, 30000).catch(() => {});
 ok((await events(e, 'area')).some((x) => x.ability === 'lava'), 'Lava pool placed');
@@ -200,6 +207,8 @@ await e.page.screenshot({ path: `${outDir}/p8-lava.png` });
 await until(e, () => window.__fw.__ev.some((x) => x.t === 'wall'), null, 120000).catch(() => {});
 ok((await events(e, 'wall')).length > 0, 'lava cooled into a rock wall');
 await e.page.screenshot({ path: `${outDir}/p8-wall.png` });
+
+await e.ctx.close();
 
 // Air: glider at level 10, then flight and spirit projection.
 const a = await open('A', `offline&char=Aang${run}&el=air&fac=freeisles`);
