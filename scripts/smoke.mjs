@@ -5,7 +5,14 @@ import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const args = process.argv.slice(2);
-const url = args.find((a) => a.startsWith('http')) ?? 'http://localhost:5173/';
+const target = new URL(args.find((a) => a.startsWith('http')) ?? 'http://localhost:5173/');
+// Skip the title screen unless the URL picks a character itself.
+if (!target.searchParams.has('char')) {
+  target.searchParams.set('char', 'Smoke');
+  target.searchParams.set('el', 'air');
+  target.searchParams.set('fac', 'freeisles');
+}
+const url = target.toString();
 const webgpu = args.includes('--webgpu');
 const outDir = 'screenshots';
 mkdirSync(outDir, { recursive: true });

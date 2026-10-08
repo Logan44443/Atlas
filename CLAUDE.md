@@ -15,15 +15,19 @@ This file covers architecture, layout, conventions and the current phase. Update
   server-authoritative combat from `shared/sim`, movement validation with corrections, StateView interest
   management, remote avatars interpolated ~110 ms behind, shared world clock, offline fallback, opt-in PvP flag
   plumbing). Verified with `scripts/net-test.mjs` (two browsers).
-- **Phase 6 Characters/factions**: in progress (accounts, characters, hubs, zones, NPCs built; see `scripts/phase6-test.mjs`).
-- Keep the phase table in `README.md` in sync whenever a phase's status changes.
+- **Phase 6 Characters/factions**: done (guest accounts upgradable to username/password, 4 character slots with
+  element + faction, PostgreSQL persistence with in-memory fallback, saved position on rejoin, 6 faction hubs with
+  walls/stalls/centrepieces, 7 NPC members per hub, safe/wild/contested zones, PvP flag on `P` with level gate,
+  spawn protection and low-level damage scaling). Verified with `scripts/phase6-test.mjs`.
+- **Phase 7 Progression**: next.
+- README.md is owned by a separate thread: don't edit it from build threads.
 
 ## Run it
 
 ```bash
 npm install
 npm run dev          # builds the world if world.json/props.json changed, then starts Vite on :5173
-npm run server       # shard server (Colyseus) on :2567; the client joins it automatically if it answers
+npm run server       # shard server (Colyseus) on :2567 + /api; uses DATABASE_URL, else local Postgres, else memory
 npm run dev:all      # both of the above
 npm run build        # typecheck + production build into dist/
 npm run world -- --force   # regenerate client/public/world/ (gitignored, ~65 MB, ~15 s)
@@ -32,11 +36,14 @@ SCENARIO=stream npm run smoke   # fly across the world, then reload and check SW
 SCENARIO=character npm run smoke   # movement + settings menu (rename, rebind)
 SCENARIO=combat node scripts/smoke.mjs "http://localhost:5173/?offline"   # 4 elements vs dummies + perfect block (offline sim)
 node scripts/net-test.mjs          # two browsers on one shard: see each other, hits, PvP, speed-hack correction
+node scripts/phase6-test.mjs       # title screen, hub spawn, NPC talk, safe vs contested PvP, patrols, saved position
 ```
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
-`?offline` (don't look for a server), `?server=ws://host:port`, `?shard=<roomId>`.
-In game: `F3` debug overlay, `F4`/`M` chunk-state map.
+`?offline` (don't look for a server), `?server=ws://host:port`, `?shard=<roomId>`,
+`?char=Name&el=fire&fac=sentinel` (skip the title screen: pick or create that character; tests use it and
+`smoke.mjs` adds it by default).
+In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag.
 
 ## Stack (fixed by design)
 
@@ -54,8 +61,10 @@ client/              Vite root (index.html, src/, public/)
   src/game/          physics (Rapier), player controller, avatar, third-person camera, nameplate
   src/game/combat/   host (CombatHost: LocalCombat offline), CombatView (sim events -> meshes/VFX), DummyView, abilities (input -> cast requests), VFX particles
   src/game/remotePlayers.ts   avatars + nameplates for other players
+  src/world/hubs.ts  faction hub + shrine buildings (merged geometry, instanced lanterns, box colliders)
   src/net/           NetCombat: Colyseus client, entity mirror + interpolation, move/cast messages
-  src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, CSS
+  src/net/account.ts AccountClient: guest/register/login, character list (offline: localStorage roster)
+  src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog, CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -66,9 +75,14 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   combat.ts          ability/element types, element power (day/night/moon/water/rock), matchups, level scaling
   sim/combatSim.ts   AUTHORITATIVE combat rules (casts, projectiles, areas, hits, block/counter, statuses) -> SimEvents
   sim/dummies.ts     training/sparring dummy AI
+  sim/npcs.ts        faction NPC members (vendors, trainers, envoys, guards, patrols)
+  factions.ts        factions, sides, zones (zoneAt), PvP numbers, hub flats -> terrainConfig(), hubSpawn
+  names.ts           name/username/password validation shared by client and server
   clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
   net.ts             wire protocol types (move/cast/welcome/correct/events)
-server/              Node shard server: index.ts (HTTP /health, /shards + Colyseus), worldRoom.ts, schema.ts
+server/              Node shard server: index.ts (HTTP /health, /shards, /api + Colyseus), worldRoom.ts, schema.ts
+  api.ts             account/character REST endpoints (rate-limited)
+  db/                Store interface: PgStore (migrations db/*.sql) and MemoryStore
 data/                ALL tunable numbers (JSON). Edit these, not code.
   quality.json       Low/Medium/High presets (pixel ratio, shadows, grass, rings, LOD)
   world.json         seed, chunk size (64 m), terrain shape, biome colours, grass, water
@@ -79,6 +93,9 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   combat.json, abilities/*.json   bending numbers (Phase 4)
   crafting/combos.json            element combo recipes (Phase 9)
   net.json           tick/patch rates, shard size, interest radii, interpolation delay, movement tolerances
+  factions.json      factions, hub positions/styles/safe radius, NPC roster/levels/names
+  zones.json         contested shrines and PvP rules (flag level, spawn protection, low-level scaling)
+  accounts.json      character slots, session length, guest rate limit, save interval
 scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
 docs/DESIGN.md       game design (keep in sync)
 ```
@@ -116,6 +133,14 @@ docs/DESIGN.md       game design (keep in sync)
   authoritative. Knockback/pull come back as `imp`; nearby events as `ev`. Each client's StateView holds
   entities within 3 chunks and drops them past 4. Dev servers accept a `tp` message (tests, free cam);
   production (`NODE_ENV=production`) does not.
+- **Accounts**: `/api/guest` mints a guest account + session token (localStorage `fw.token`); register upgrades
+  it in place. Joining a room requires `{token, characterId}`; `onAuth` checks both and allows one live session
+  per character. Positions save on leave and every `saveEverySeconds`.
+- **Factions/zones**: `zoneAt(x,z)` is the single source for safe/wild/contested. `canHarm(a,b,time)` in the sim
+  applies all damage rules (same side, safe zone, spawn protection, contested vs flagged wilds). Hub and shrine
+  sites are levelled through `TerrainConfig.flats`, so every sampler must be built from `terrainConfig()`.
+- **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
+  are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
 
 ## Conventions
 

@@ -1,5 +1,5 @@
 // Phase 5 check: two browsers join the same shard, see each other move, and
-// server-authoritative hits land (on a dummy, then PvP once both opt in).
+// server-authoritative hits land (on a dummy, then PvP at a contested shrine).
 // Needs `npm run server` and `npm run dev` running. Usage: node scripts/net-test.mjs [url]
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -9,9 +9,9 @@ const outDir = 'screenshots';
 mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 
-async function open(name, element) {
+const run = Date.now().toString(36).slice(-4);
+async function open(name, element, faction) {
   const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
-  await ctx.addInitScript(([n, e]) => localStorage.setItem('fw.settings', JSON.stringify({ name: n, element: e })), [name, element]);
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -19,7 +19,10 @@ async function open(name, element) {
     if (m.type() === 'error') errors.push(m.text());
     if (m.text().startsWith('[net]')) console.log(`  ${name}: ${m.text()}`);
   });
-  await page.goto(url);
+  // ?char= skips the title screen (guest account, character created on first use).
+  const u = new URL(url);
+  u.search = `char=${name}${run}&el=${element}&fac=${faction}`;
+  await page.goto(u.toString());
   await page.waitForSelector('#loading.done', { timeout: 240000 });
   await page.evaluate(() => window.__fw.netReady);
   return { page, errors, name };
@@ -37,18 +40,23 @@ const state = (p) =>
   });
 const until = async (p, fn, arg, timeout = 60000) => p.page.waitForFunction(fn, arg, { timeout, polling: 250 });
 
-const a = await open('Aang', 'air');
-const b = await open('Zuko', 'fire');
+const a = await open('Aang', 'air', 'freeisles');
+const b = await open('Zuko', 'fire', 'redfang');
 let sa = await state(a);
 let sb = await state(b);
 ok(sa.online && sb.online, `both online (${sa.net} / ${sb.net})`);
 ok(sa.net === sb.net, 'same shard');
 
+// Each spawns in their own faction hub; meet in the open near the training dummies.
+await a.page.evaluate(() => window.__fw.tp(0, -1));
+await b.page.evaluate(() => window.__fw.tp(3, 4));
 await until(a, (id) => window.__fw.host.entities.has(id), sb.me);
 await until(b, (id) => window.__fw.host.entities.has(id), sa.me);
 ok(true, 'each sees the other player');
 
 // Movement: A walks forward; B should see A's position change (interpolated).
+// The teleport lands on A's next frame; wait for it before measuring the walk.
+await until(a, () => Math.hypot(window.__fw.player.renderPos.x, window.__fw.player.renderPos.z + 1) < 1);
 const before = (await state(b)).ents.find((e) => e.id === sa.me);
 const start = await a.page.evaluate(() => ({ x: window.__fw.player.renderPos.x, z: window.__fw.player.renderPos.z }));
 await a.page.keyboard.down('KeyW');
@@ -78,11 +86,9 @@ await until(b, (h) => window.__fw.host.entities.get('dummy_a')?.hp < h, hp0, 200
 const hp1 = await dummyHp(b);
 ok(hp1 < hp0, `A's air heavy hit dummy_a: B sees hp ${hp0} -> ${hp1}`);
 
-// PvP: both opt in, A blasts B.
-await a.page.evaluate(() => window.__fw.host.setPvp(true));
-await b.page.evaluate(() => window.__fw.host.setPvp(true));
-await b.page.evaluate(() => window.__fw.tp(0, 6));
-await a.page.evaluate(() => window.__fw.tp(0, 1));
+// PvP: opposite sides at the Stone Shrine (contested, no flag needed).
+await b.page.evaluate(() => window.__fw.tp(175, 505));
+await a.page.evaluate(() => window.__fw.tp(175, 500));
 await a.page.waitForTimeout(1500);
 const bHp0 = await b.page.evaluate(() => window.__fw.host.me.hp);
 // Air basic, re-cast a few times (it has a short cooldown and B may still be interpolating in).
@@ -102,9 +108,9 @@ ok(bHp1 < bHp0, `PvP: A hit B, B's own hp ${bHp0} -> ${bHp1}`);
 
 // Speed hack: a client-side teleport without the dev 'tp' message gets corrected.
 await b.page.evaluate(() => window.__fw.player.teleport(120, 120));
-await until(b, () => window.__fw.player.renderPos.x < 60, null, 30000).catch(() => {});
-const bPos = await b.page.evaluate(() => window.__fw.player.renderPos.x);
-ok(bPos < 60, `server rejected a 160 m jump and snapped B back (x=${bPos.toFixed(1)})`);
+await until(b, () => Math.hypot(window.__fw.player.renderPos.x - 175, window.__fw.player.renderPos.z - 505) < 20, null, 30000).catch(() => {});
+const bOff = await b.page.evaluate(() => Math.hypot(window.__fw.player.renderPos.x - 175, window.__fw.player.renderPos.z - 505));
+ok(bOff < 20, `server rejected a 400 m jump and snapped B back (${bOff.toFixed(1)} m from where B was)`);
 
 await b.page.evaluate(() => { window.__fw.tpc.yaw = Math.PI; });
 await b.page.waitForTimeout(1500);

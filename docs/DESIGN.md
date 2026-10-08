@@ -93,6 +93,10 @@ trainers, quest givers, patrolling guards and fighters), a color and emblem, and
   - Repeatedly killing the same player gives diminishing XP.
   - 10 seconds of spawn protection.
   - Levels 1–9 cannot be flagged.
+- **As built (Phase 6)**: the flag toggles with `P` (10 s cooldown). Hub locations and safe radii live in
+  `data/factions.json`, the three contested shrines (Ember, Tide, Stone) and all PvP numbers in `data/zones.json`.
+  Each hub has 7 NPC members (vendor, trainer, envoy, two gate guards, two patrols); patrols attack players of the
+  other side nearby, guards only fight back. Dummies and NPCs never fight each other.
 
 ## 6. Bending combat
 
@@ -126,13 +130,26 @@ Default PC layout (third-person action, keyboard + mouse):
 | Basic / Heavy / Control / Defense / Mobility / Ultimate | Left click / Q / E / R / F / X |
 | Block (perfect timing = counter) | Hold right click |
 | Cycle target / interact | Tab / G |
+| Toggle PvP flag | P |
 
 - **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
   mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
   and mouse sensitivity / invert-Y.
-- Defaults live in `data/controls.json`. Player overrides are saved locally now, and to the account once accounts
-  exist (Phase 6), where the server also validates names (length, allowed characters, uniqueness, profanity filter).
+- Defaults live in `data/controls.json`. Player overrides are saved locally (`fw.settings`). Character names are
+  validated by the server (length, allowed characters, uniqueness) on create and rename; a profanity filter is
+  still to do.
 - Gamepad support arrives with combat (Phase 4); touch controls (virtual stick + ability buttons) in the polish phase.
+
+## 6b. Accounts and characters (as built in Phase 6)
+
+- First visit creates a **guest account** automatically (token in localStorage), so players are in the game in one
+  click. "Create an account" upgrades the guest in place (username + password, scrypt-hashed) and keeps its
+  characters; "Sign in" works from any device.
+- 4 character slots per account. Element is permanent; faction is picked at creation.
+- Characters save position and level on logout and every 30 s, and log back in where they left off. One live
+  session per character.
+- Storage is PostgreSQL (`DATABASE_URL`); without a database the server keeps accounts in memory, and without a
+  server the client keeps characters in the browser and plays offline.
 
 ## 7. XP and progression
 

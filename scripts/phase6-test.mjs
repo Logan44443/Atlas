@@ -92,8 +92,9 @@ const castAt = (p, id) =>
   }, id);
 const hpOf = (p) => p.page.evaluate(() => window.__fw.host.me.hp);
 
+// Water Whip is melee (6.5 m), so stand 4 m apart: a miss can't pass for safe-zone protection.
 await b.page.evaluate(() => window.__fw.tp(-1090, -490 + 14));
-await a.page.evaluate(() => window.__fw.tp(-1090, -490 + 8));
+await a.page.evaluate(() => window.__fw.tp(-1090, -490 + 10));
 await simWait(a, 2);
 await a.page.waitForFunction((id) => window.__fw.host.entities.has(id), bId, { timeout: 60000 });
 let h0 = await hpOf(b);
@@ -103,8 +104,8 @@ let h1 = await hpOf(b);
 ok(h1 === h0, `safe zone: A's attacks did nothing to B (${h0} -> ${h1})`);
 
 // Stone Shrine (contested).
-await b.page.evaluate(() => window.__fw.tp(180, 500 + 6));
-await a.page.evaluate(() => window.__fw.tp(180, 500 - 1));
+await b.page.evaluate(() => window.__fw.tp(175, 504));
+await a.page.evaluate(() => window.__fw.tp(175, 500));
 await simWait(a, 2);
 await a.page.waitForFunction((id) => window.__fw.host.entities.has(id), bId, { timeout: 60000 });
 const zoneB = await b.page.evaluate(() => document.querySelector('.zone-tag')?.textContent);

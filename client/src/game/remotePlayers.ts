@@ -4,6 +4,11 @@ import { Avatar, type Element } from './avatar';
 import { Nameplate } from './nameplate';
 import type { CombatView } from './combat/combatView';
 import { factionById } from '@shared/factions';
+import netData from '@data/net.json';
+import worldData from '@data/world.json';
+
+// Same reach as the server's interest management, so offline (where every NPC is local) draws what online would.
+const DRAW_DISTANCE = netData.interestAddChunks * worldData.chunkSize;
 
 /** Nameplate text + colour: NPCs show their title in faction colours, PvP-flagged players glow red. */
 function plateFor(e: SimEntity): { text: string; color: string } {
@@ -32,9 +37,17 @@ export class RemotePlayers {
   }
 
   update(dt: number, entities: Map<string, SimEntity>, myId: string): void {
+    const me = entities.get(myId);
     for (const e of entities.values()) {
       if ((e.kind !== 'player' && e.kind !== 'npc') || e.id === myId) continue;
       let v = this.views.get(e.id);
+      if (me && Math.hypot(e.pos.x - me.pos.x, e.pos.z - me.pos.z) > DRAW_DISTANCE) {
+        if (v) {
+          v.avatar.root.visible = false;
+          v.last.copy(e.pos);
+        }
+        continue;
+      }
       const el = e.element ?? 'fire';
       if (v && v.element !== el) {
         this.drop(e.id);
@@ -64,6 +77,7 @@ export class RemotePlayers {
         v.vy = (e.pos.y - v.last.y) / dt;
       }
       v.last.copy(e.pos);
+      v.avatar.root.visible = true;
       v.avatar.root.position.copy(e.pos);
       v.avatar.root.rotation.y = e.yaw;
       v.avatar.root.rotation.z = e.dead ? Math.PI / 2 : 0;
