@@ -33,7 +33,8 @@ export class DebugOverlay {
 
   constructor(cb: DebugCallbacks, quality: QualitySetting, help: string) {
     this.el = document.createElement('div');
-    this.el.className = 'debug';
+    // Hidden until F3 (or ?debug in the URL).
+    this.el.className = new URLSearchParams(location.search).has('debug') ? 'debug' : 'debug hidden';
     this.body = document.createElement('div');
     this.el.appendChild(this.body);
     this.el.appendChild(document.createElement('hr'));

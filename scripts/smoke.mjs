@@ -12,6 +12,7 @@ if (!target.searchParams.has('char')) {
   target.searchParams.set('el', 'air');
   target.searchParams.set('fac', 'freeisles');
 }
+target.searchParams.set('debug', '');
 const url = target.toString();
 const webgpu = args.includes('--webgpu');
 const outDir = 'screenshots';
