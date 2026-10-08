@@ -15,7 +15,8 @@ This file covers architecture, layout, conventions and the current phase. Update
   server-authoritative combat from `shared/sim`, movement validation with corrections, StateView interest
   management, remote avatars interpolated ~110 ms behind, shared world clock, offline fallback, opt-in PvP flag
   plumbing). Verified with `scripts/net-test.mjs` (two browsers).
-- **Phase 6 Characters/factions**: next.
+- **Phase 6 Characters/factions**: in progress (accounts, characters, hubs, zones, NPCs built; see `scripts/phase6-test.mjs`).
+- Keep the phase table in `README.md` in sync whenever a phase's status changes.
 
 ## Run it
 
