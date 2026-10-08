@@ -1,0 +1,13 @@
+{
+  "element": "earth",
+  "_comment": "Earth: tank and zone control. Must be grounded to bend; stronger standing on rock.",
+  "requiresGrounded": true,
+  "abilities": [
+    { "slot": "basic",    "id": "rock_throw",     "name": "Rock Throw",     "kind": "projectile", "damage": 12, "chiCost": 0,  "cooldown": 0.55, "range": 26, "speed": 32, "radius": 0.45, "gravity": 6, "vfx": "rock", "anim": "throw" },
+    { "slot": "heavy",    "id": "boulder_smash",  "name": "Boulder Smash",  "kind": "projectile", "damage": 40, "chiCost": 24, "cooldown": 5,    "range": 24, "speed": 20, "radius": 1.1, "splash": 3.5, "knockback": 8, "windup": 0.4, "vfx": "boulder", "anim": "heavy" },
+    { "slot": "mobility", "id": "pillar_launch",  "name": "Pillar Launch",  "kind": "dash",       "damage": 0,  "chiCost": 15, "cooldown": 6,    "distance": 4, "lift": 13, "duration": 0.25, "vfx": "pillar", "anim": "launch" },
+    { "slot": "defense",  "id": "stone_armor",    "name": "Stone Armor",    "kind": "shield",     "damage": 0,  "chiCost": 20, "cooldown": 14,   "duration": 6, "reduction": 0.5, "blocksProjectiles": false, "radius": 1.1, "vfx": "stone_armor", "anim": "armor" },
+    { "slot": "control",  "id": "quake_root",     "name": "Quake Root",     "kind": "ring",       "damage": 14, "chiCost": 25, "cooldown": 12,   "radius": 5, "duration": 0.5, "tick": 0.5, "status": { "type": "root", "duration": 1.5 }, "vfx": "quake", "anim": "stomp" },
+    { "slot": "ultimate", "id": "earthquake_ring","name": "Earthquake Ring","kind": "ring",       "damage": 22, "chiCost": 60, "cooldown": 40,   "radius": 10, "duration": 3, "tick": 0.5, "knockback": 5, "status": { "type": "slow", "duration": 2, "amount": 0.4 }, "vfx": "earthquake", "anim": "stomp" }
+  ]
+}

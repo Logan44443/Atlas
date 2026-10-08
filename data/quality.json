@@ -1,0 +1,51 @@
+{
+  "_comment": "Render quality presets. 'auto' picks one at startup (see client/src/engine/quality.ts). All numbers tunable.",
+  "targetFps": { "low": 30, "medium": 45, "high": 60 },
+  "presets": {
+    "low": {
+      "label": "Low",
+      "pixelRatioCap": 1.0,
+      "renderScale": 0.8,
+      "shadows": false,
+      "shadowMapSize": 512,
+      "shadowDistance": 60,
+      "bloom": false,
+      "grassDensity": 0.3,
+      "grassRadius": 40,
+      "terrainSegments": { "near": 32, "mid": 16, "far": 8 },
+      "rings": { "near": 1, "mid": 2, "far": 4 },
+      "fogScale": 0.6,
+      "propDensity": 0.4
+    },
+    "medium": {
+      "label": "Medium",
+      "pixelRatioCap": 1.5,
+      "renderScale": 1.0,
+      "shadows": true,
+      "shadowMapSize": 1024,
+      "shadowDistance": 80,
+      "bloom": true,
+      "grassDensity": 0.6,
+      "grassRadius": 60,
+      "terrainSegments": { "near": 64, "mid": 32, "far": 8 },
+      "rings": { "near": 1, "mid": 3, "far": 6 },
+      "fogScale": 0.8,
+      "propDensity": 0.7
+    },
+    "high": {
+      "label": "High",
+      "pixelRatioCap": 2.0,
+      "renderScale": 1.0,
+      "shadows": true,
+      "shadowMapSize": 2048,
+      "shadowDistance": 110,
+      "bloom": true,
+      "grassDensity": 1.0,
+      "grassRadius": 80,
+      "terrainSegments": { "near": 64, "mid": 32, "far": 16 },
+      "rings": { "near": 2, "mid": 4, "far": 8 },
+      "fogScale": 1.0,
+      "propDensity": 1.0
+    }
+  }
+}

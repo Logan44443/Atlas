@@ -1,0 +1,12 @@
+{
+  "element": "water",
+  "_comment": "Water: control and sustain; stronger near water, at night and under a full moon.",
+  "abilities": [
+    { "slot": "basic",    "id": "water_whip",   "name": "Water Whip",   "kind": "melee",      "damage": 10, "chiCost": 0,  "cooldown": 0.45, "range": 6.5, "angle": 55, "combo": 2, "comboBonus": 0.4, "vfx": "water_whip", "anim": "whip" },
+    { "slot": "heavy",    "id": "ice_spikes",   "name": "Ice Spikes",   "kind": "projectile", "damage": 26, "chiCost": 20, "cooldown": 4,    "range": 30, "speed": 36, "radius": 0.5, "count": 3, "spread": 8, "status": { "type": "slow", "duration": 2, "amount": 0.3 }, "vfx": "ice_shard", "anim": "heavy" },
+    { "slot": "mobility", "id": "wave_surf",    "name": "Wave Surf",    "kind": "dash",       "damage": 0,  "chiCost": 14, "cooldown": 6,    "distance": 14, "duration": 0.7, "trail": "water_trail", "vfx": "wave", "anim": "surf" },
+    { "slot": "defense",  "id": "ice_wall",     "name": "Ice Wall",     "kind": "shield",     "damage": 0,  "chiCost": 18, "cooldown": 10,   "duration": 4, "reduction": 0.8, "blocksProjectiles": true, "radius": 2.2, "vfx": "ice_wall", "anim": "raise" },
+    { "slot": "control",  "id": "freeze",       "name": "Freeze",       "kind": "projectile", "damage": 8,  "chiCost": 25, "cooldown": 12,   "range": 22, "speed": 28, "radius": 0.6, "status": { "type": "root", "duration": 1.8 }, "vfx": "freeze", "anim": "push" },
+    { "slot": "ultimate", "id": "tidal_surge",  "name": "Tidal Surge",  "kind": "cone",       "damage": 40, "chiCost": 60, "cooldown": 40,   "range": 14, "angle": 70, "duration": 0.6, "tick": 0.6, "knockback": 12, "selfHeal": 25, "vfx": "tidal", "anim": "surge" }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "_comment": "Special Arts (DESIGN section 8). Each art: element ('any' for all), level gate, a master NPC somewhere in the world and a quest (steps in order). Step types: talk (speak to the master), visit (reach every point; night = only counts at night), kill (defeat enemies; filter enemy|fighter|player, zone optional, night optional), meditate (stand still within radius of each point for seconds). passive arts need no slot; the rest go in the Art slot (T). ability uses the normal ability fields plus: heal, cleanse, charge, grapple, nightOnly, wallSeconds, stamina, vulnerable.",
+  "pvpHealScale": 0.5,
+  "pvpCombatSeconds": 8,
+  "arts": [
+    {
+      "id": "healing", "name": "Healing", "element": "water", "level": 15,
+      "text": "Channel water to heal allies around you and wash away burns.",
+      "limits": "Healing is halved while you are fighting other players.",
+      "master": { "name": "Mother Senna", "title": "Healer", "x": -1300, "z": -260, "hint": "A healer tends a spirit spring west of the Lantern Monastery." },
+      "lines": { "offer": "Water remembers every wound it has washed. Will you learn to listen?", "progress": "The springs are waiting. Drink from each, then return.", "done": "Your hands are steady now. Heal well, and never in anger." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "visit", "text": "Visit the three spirit springs", "radius": 12, "points": [{ "label": "North spring", "x": -1180, "z": -620 }, { "label": "West spring", "x": -1480, "z": -420 }, { "label": "South spring", "x": -1200, "z": -80 }] },
+        { "type": "talk", "text": "Return to Mother Senna" }
+      ],
+      "ability": { "slot": "art", "id": "healing", "name": "Healing Waters", "kind": "heal", "damage": 0, "heal": 11, "cleanse": ["burn"], "chiCost": 30, "cooldown": 12, "radius": 7, "duration": 3, "tick": 0.5, "vfx": "heal", "anim": "channel" }
+    },
+    {
+      "id": "lightning", "name": "Lightning", "element": "fire", "level": 20,
+      "text": "Charge for 1.5 seconds, then strike in an instant line.",
+      "limits": "You can't move while charging. A firebender who knows Lightning can redirect it with a perfectly timed block.",
+      "master": { "name": "Old Kazan", "title": "Storm Hermit", "x": 1080, "z": 30, "hint": "An old hermit lives on Storm Peak, the high summit north of the Tide Shrine." },
+      "lines": { "offer": "Lightning is cold fire. Separate yin from yang, or it will separate you.", "progress": "Prove your fire against real opponents, then sit with the storm.", "done": "The storm answers you now. Never aim it at your heart." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "kill", "text": "Defeat 3 enemies", "count": 3, "filter": "enemy" },
+        { "type": "meditate", "text": "Meditate on the summit", "radius": 10, "seconds": 10, "points": [{ "label": "Storm Peak summit", "x": 1080, "z": 24 }] },
+        { "type": "talk", "text": "Return to Old Kazan" }
+      ],
+      "ability": { "slot": "art", "id": "lightning", "name": "Lightning", "kind": "beam", "damage": 80, "charge": 1.5, "range": 45, "radius": 0.9, "chiCost": 50, "cooldown": 18, "vfx": "lightning", "anim": "lightning" }
+    },
+    {
+      "id": "metal", "name": "Metalbending", "element": "earth", "level": 20,
+      "text": "Fire a metal cable: it drags enemies to you, or pulls you to the ground it strikes.",
+      "limits": "Pulls hardest on armored targets (Stone Armor, shields).",
+      "master": { "name": "Forgemaster Ruk", "title": "Metal Sage", "x": 1160, "z": -1360, "hint": "The miners of Ironhollow, east of the Free Isles harbor, know a metal sage." },
+      "lines": { "offer": "Metal is earth that forgot it was earth. Remind it.", "progress": "Find the ore veins and feel the impurities in each.", "done": "Iron listens now. Use it well." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "visit", "text": "Touch the three ore veins", "radius": 10, "points": [{ "label": "Upper vein", "x": 1240, "z": -1440 }, { "label": "Lower vein", "x": 1080, "z": -1300 }, { "label": "Deep vein", "x": 1260, "z": -1260 }] },
+        { "type": "talk", "text": "Return to Forgemaster Ruk" }
+      ],
+      "ability": { "slot": "art", "id": "metal", "name": "Metal Cable", "kind": "projectile", "grapple": true, "damage": 10, "range": 32, "speed": 60, "radius": 0.35, "pull": 16, "chiCost": 20, "cooldown": 8, "vfx": "metal", "anim": "jab" }
+    },
+    {
+      "id": "lava", "name": "Lavabending", "element": "earth", "level": 35,
+      "text": "Melt the ground where you aim into a lava pool that burns enemies.",
+      "limits": "Long cooldown. The lava cools into a rock wall after 8 seconds.",
+      "master": { "name": "Ashmother Vey", "title": "Volcano Master", "x": -1224, "z": 280, "hint": "Smoke rises from Ember Crater, the peak west of the Ember Shrine." },
+      "lines": { "offer": "Earth with fire in its belly. Do you have the patience to boil stone?", "progress": "Fight in the contested lands, then sit in the crater's heat.", "done": "The mountain's blood flows for you. Respect it." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "kill", "text": "Defeat 5 enemies in contested territory", "count": 5, "filter": "enemy", "zone": "contested" },
+        { "type": "meditate", "text": "Meditate in Ember Crater", "radius": 12, "seconds": 15, "points": [{ "label": "Ember Crater", "x": -1224, "z": 280 }] },
+        { "type": "talk", "text": "Return to Ashmother Vey" }
+      ],
+      "ability": { "slot": "art", "id": "lava", "name": "Lava Pool", "kind": "pool", "damage": 8, "range": 22, "radius": 4.5, "duration": 8, "tick": 0.5, "wallSeconds": 10, "status": { "type": "burn", "duration": 3, "dps": 6 }, "chiCost": 40, "cooldown": 30, "vfx": "lava", "anim": "stomp" }
+    },
+    {
+      "id": "combustion", "name": "Combustion", "element": "fire", "level": 35,
+      "text": "A long-range explosive shot from the third eye.",
+      "limits": "Telegraphed with a visible glow; 45 second cooldown. (The design's world-boss scroll arrives with world bosses in Phase 10.)",
+      "master": { "name": "The Third Eye", "title": "Combustion Adept", "x": 40, "z": 1768, "hint": "Someone meditates on the southern summit beyond the Ash Syndicate's den." },
+      "lines": { "offer": "Focus everything into one point. Then let it go.", "progress": "Bring down your enemies and walk every shrine. Focus comes from discipline.", "done": "Your mind is a fuse. Light it rarely." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "kill", "text": "Defeat 8 enemies", "count": 8, "filter": "enemy" },
+        { "type": "visit", "text": "Walk all three shrines", "radius": 30, "points": [{ "label": "Ember Shrine", "x": -960, "z": 320 }, { "label": "Tide Shrine", "x": 800, "z": -140 }, { "label": "Stone Shrine", "x": 180, "z": 500 }] },
+        { "type": "talk", "text": "Return to the Third Eye" }
+      ],
+      "ability": { "slot": "art", "id": "combustion", "name": "Combustion", "kind": "projectile", "damage": 60, "windup": 1.0, "range": 70, "speed": 65, "radius": 0.5, "splash": 5, "knockback": 10, "chiCost": 45, "cooldown": 45, "vfx": "combustion", "anim": "heavy" }
+    },
+    {
+      "id": "glider", "name": "Glider", "element": "air", "level": 10, "passive": true,
+      "text": "Press jump in the air to open your glider; release to drop.",
+      "limits": "Glides down, never up. Taking a hit closes it.",
+      "master": null,
+      "steps": [],
+      "ability": null
+    },
+    {
+      "id": "flight", "name": "Flight", "element": "air", "level": 40,
+      "text": "Free flight on a stamina bar. Jump climbs, sprint dives.",
+      "limits": "No offensive bending while flying; stamina drains twice as fast in combat.",
+      "master": { "name": "Abbot Wen", "title": "Windspire Abbot", "x": 1048, "z": -824, "hint": "The Windspire Monastery sits on the summit north of the Free Isles harbor." },
+      "lines": { "offer": "To fly, you must let go of the ground inside you.", "progress": "Stand on the high places. Feel how small the world is.", "done": "The sky is yours. Come back down sometimes." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "visit", "text": "Stand on three summits", "radius": 15, "points": [{ "label": "Storm Peak", "x": 1080, "z": 24 }, { "label": "Stone Crown", "x": -8, "z": 536 }, { "label": "Heart Hill", "x": -136, "z": -168 }] },
+        { "type": "talk", "text": "Return to Abbot Wen" }
+      ],
+      "ability": { "slot": "art", "id": "flight", "name": "Flight", "kind": "flight", "damage": 0, "stamina": 12, "chiCost": 30, "cooldown": 20, "vfx": "air", "anim": "dash" }
+    },
+    {
+      "id": "blood", "name": "Bloodbending", "element": "water", "level": 40, "nightOnly": true,
+      "text": "At night, seize one enemy within 10 m: hold them in place and drag them toward you for 2 seconds.",
+      "limits": "Night only (stronger under a full moon). 60 second cooldown and a huge chi cost. Order players who learn it lose a faction rank and gain a bounty; the Hollow Moon Cult has no penalty.",
+      "penalty": { "side": "order", "exempt": ["hollowmoon"], "rank": 1, "bounty": true },
+      "master": { "name": "The Pale Lady", "title": "Forbidden Master", "x": 1192, "z": 1736, "hint": "On moonlit nights, a pale woman is seen on the far southern hills past the Hollow Moon temple." },
+      "lines": { "offer": "Everything that lives is mostly water. Did your teachers never tell you that?", "progress": "Under the moon only. Take three who stand against you.", "done": "Now you know. You can never not know.", "day": "Come back when the moon is up." },
+      "steps": [
+        { "type": "talk", "night": true },
+        { "type": "kill", "text": "Defeat 3 enemies at night", "count": 3, "filter": "enemy", "night": true },
+        { "type": "talk", "text": "Return to the Pale Lady at night", "night": true }
+      ],
+      "ability": { "slot": "art", "id": "blood", "name": "Bloodbending", "kind": "grab", "damage": 6, "range": 10, "angle": 30, "duration": 2, "pull": 7, "status": { "type": "root", "duration": 2 }, "chiCost": 80, "cooldown": 60, "nightOnly": true, "vfx": "blood", "anim": "channel" }
+    },
+    {
+      "id": "spirit", "name": "Spirit Projection", "element": "any", "level": 45,
+      "text": "Leave your body as a spirit for 15 seconds: scout ahead and see every enemy nearby.",
+      "limits": "Your body can't move and takes 50% more damage while you are out.",
+      "master": { "name": "The Wanderer", "title": "Spirit Guide", "x": -136, "z": -168, "hint": "A wanderer sits under the old tree on Heart Hill, near the middle of the world." },
+      "lines": { "offer": "The other world is closer than you think. Sit with me.", "progress": "Meditate at each shrine until the spirits notice you.", "done": "Go gently between worlds." },
+      "steps": [
+        { "type": "talk" },
+        { "type": "meditate", "text": "Meditate at the three shrines", "radius": 15, "seconds": 20, "points": [{ "label": "Ember Shrine", "x": -960, "z": 320 }, { "label": "Tide Shrine", "x": 800, "z": -140 }, { "label": "Stone Shrine", "x": 180, "z": 500 }] },
+        { "type": "talk", "text": "Return to the Wanderer" }
+      ],
+      "ability": { "slot": "art", "id": "spirit", "name": "Spirit Projection", "kind": "spirit", "damage": 0, "duration": 15, "range": 90, "vulnerable": 1.5, "chiCost": 40, "cooldown": 60, "vfx": "spirit", "anim": "channel" }
+    }
+  ],
+  "glider": { "fallSpeed": 3.2, "speed": 8.5 },
+  "flight": { "speed": 10, "climb": 6, "combatDrain": 2 }
+}

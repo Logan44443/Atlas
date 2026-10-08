@@ -1,0 +1,22 @@
+{
+  "_comment": "Character movement and camera tuning. Units: metres, seconds.",
+  "capsule": { "radius": 0.35, "halfHeight": 0.55 },
+  "walkSpeed": 4.6,
+  "runSpeed": 8.8,
+  "airControl": 0.35,
+  "acceleration": 40,
+  "turnSpeed": 12,
+  "jumpVelocity": 7.2,
+  "gravity": -24,
+  "maxFallSpeed": 40,
+  "coyoteTime": 0.12,
+  "jumpBuffer": 0.12,
+  "stepHeight": 0.45,
+  "maxSlopeDegrees": 50,
+  "snapToGround": 0.5,
+  "dodge": { "distance": 5.0, "duration": 0.38, "cooldown": 0.8 },
+  "swim": { "speed": 3.2, "depth": 1.1 },
+  "camera": { "distance": 6.0, "minDistance": 2.2, "maxDistance": 14, "height": 1.55, "shoulder": 0.55, "minPitch": -1.2, "maxPitch": 0.9, "fov": 62, "followLerp": 14 },
+  "nameMinLength": 3,
+  "nameMaxLength": 16
+}

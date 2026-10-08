@@ -90,9 +90,14 @@ trainers, quest givers, patrolling guards and fighters), a color and emblem, and
   Territory wars run on a schedule (for example, twice a day).
 - **Anti-griefing**:
   - Players 10+ levels below you give 0 XP and take reduced damage from you.
-  - Repeatedly killing the same player gives diminishing XP.
+  - Repeatedly killing the same player gives diminishing XP (halved each time within 10 minutes, nothing after
+    the 4th), and killing a player within 30 s of their respawn gives none.
   - 10 seconds of spawn protection.
   - Levels 1–9 cannot be flagged.
+- **As built (Phase 6)**: the flag toggles with `P` (10 s cooldown). Hub locations and safe radii live in
+  `data/factions.json`, the three contested shrines (Ember, Tide, Stone) and all PvP numbers in `data/zones.json`.
+  Each hub has 7 NPC members (vendor, trainer, envoy, two gate guards, two patrols); patrols attack players of the
+  other side nearby, guards only fight back. Dummies and NPCs never fight each other.
 
 ## 6. Bending combat
 
@@ -115,6 +120,40 @@ Elemental matchups are soft, not rock-paper-scissors: Water's freeze slows Fire,
 ground (it loses its grounded bonus), Earth's walls block Fire projectiles, and Fire burns away Air's barriers.
 The bonus is about 10%, so skill matters more than matchup.
 
+## 6a. Controls and settings
+
+Default PC layout (third-person action, keyboard + mouse):
+
+| Action | Default |
+|---|---|
+| Move / sprint / jump / dodge | WASD / hold Shift / Space / V (or double-tap a direction) |
+| Camera | Mouse (click to capture, Esc releases), wheel zoom |
+| Basic / Heavy / Control / Defense / Mobility / Ultimate | Left click / Q / E / R / F / X |
+| Block (perfect timing = counter) | Hold right click |
+| Cycle target / interact | Tab / G |
+| Toggle PvP flag | P |
+| Mastery tree / invite to party / accept / decline | K / I / Y / N |
+| Special Art (equipped) / Arts & quests panel | T / J |
+
+- **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
+  mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
+  and mouse sensitivity / invert-Y.
+- Defaults live in `data/controls.json`. Player overrides are saved locally (`fw.settings`). Character names are
+  validated by the server (length, allowed characters, uniqueness) on create and rename; a profanity filter is
+  still to do.
+- Gamepad support arrives with combat (Phase 4); touch controls (virtual stick + ability buttons) in the polish phase.
+
+## 6b. Accounts and characters (as built in Phase 6)
+
+- First visit creates a **guest account** automatically (token in localStorage), so players are in the game in one
+  click. "Create an account" upgrades the guest in place (username + password, scrypt-hashed) and keeps its
+  characters; "Sign in" works from any device.
+- 4 character slots per account. Element is permanent; faction is picked at creation.
+- Characters save position and level on logout and every 30 s, and log back in where they left off. One live
+  session per character.
+- Storage is PostgreSQL (`DATABASE_URL`); without a database the server keeps accounts in memory, and without a
+  server the client keeps characters in the browser and plays offline.
+
 ## 7. XP and progression
 
 - XP sources: NPC kills, quests, PvP kills (scaled by level difference), territory captures, taming, building
@@ -123,6 +162,13 @@ The bonus is about 10%, so skill matters more than matchup.
 - Mastery tree per element, with 3 branches. Example for Fire: Precision (crit, range), Inferno (area damage,
   burn) and Breath (chi efficiency, sustain). A respec is available for gold.
 - Special Arts need: a level threshold, a mastery quest from a master NPC (hidden in the world), and sometimes faction rank.
+- **As built (Phase 7)**: XP to next level = 100 × level^1.5. Kill XP depends on the target (patrol 90, guard 160,
+  player 150, training dummies only up to level 5) times a level-difference factor (0.25×–1.6×, nothing for targets
+  10+ levels below). First visits to each hub (120) and contested shrine (250) give discovery XP. Each tree has 5
+  skills per branch in 4 tiers (tier unlocks at 0/5/10/15 points in that branch, capstones are 1 rank); skills add
+  damage, crit chance, range, area size, status duration/strength, cooldown and chi-cost reductions, max health,
+  chi regen and armor. Respec is free until gold exists (`respecGold` in `data/progression.json`). Numbers live in
+  `data/progression.json` and `data/mastery.json`.
 
 ## 8. Special Arts (advanced bending)
 
@@ -137,10 +183,38 @@ The bonus is about 10%, so skill matters more than matchup.
 | Bloodbending | Water | Lv 40 + forbidden quest; at night only (stronger under a full moon) | Grab one target within 10 m: root or drag them for 2 s | 60 s cooldown and huge chi cost. Order players who learn it lose faction rank and gain a bounty. Hollow Moon Cult has no penalty. |
 | Spirit Projection | Any | Lv 45 + spirit-world questline | Leave your body as a spirit to scout or reveal hidden enemies | Your body is vulnerable while you're out |
 
+**As built (Phase 8)**: every art except the Glider has a **master NPC** with a camp somewhere in the world and a
+quest of steps (`talk`, `visit` points, `kill` enemies, `meditate` = stand still at a point for N seconds). Talk to
+the master with the interact key once you reach the level; the **Arts panel (J)** lists your element's arts with
+quest progress, the master's whereabouts hint and a **Track** button that drives a compass under the zone name. Quest
+points are marked by stone cairns. A learned art goes in the new **Art slot (T)**; you can equip one at a time.
+Everything lives in `data/arts.json` and runs in the shared sim (server-authoritative online).
+
+| Art | Master and quest | What it does in game |
+|---|---|---|
+| Healing | Mother Senna, west of the Lantern Monastery: visit 3 spirit springs | 3 s circle that follows you, heals allies 11 per 0.5 s and cleanses burn; half healing within 8 s of PvP |
+| Lightning | Old Kazan, Storm Peak: defeat 3 enemies, meditate 10 s on the summit | Roots you for a 1.5 s charge, then an instant 45 m line strike (80 damage). Walls stop it. A firebender who knows Lightning and perfect-blocks it sends it back |
+| Metalbending | Forgemaster Ruk, Ironhollow: touch 3 ore veins | Metal cable: pulls a hit enemy to you (harder if shielded/armored); hitting ground zips you there |
+| Lavabending | Ashmother Vey, Ember Crater: 5 kills in contested land, meditate 15 s in the crater | Lava pool where you aim (burn + damage for 8 s), then a rock wall for 10 s that blocks projectiles and lightning |
+| Combustion | The Third Eye, the southern summit: 8 kills, walk all three shrines | 1 s glowing wind-up, then a 70 m explosive shot. The world-boss scroll arrives with Phase 10 |
+| Glider | none: automatic for airbenders at level 10 | Jump in the air to open/close; glides at 8.5 m/s, falling 3.2 m/s; a hit closes it |
+| Flight | Abbot Wen, Windspire: stand on 3 summits | 12 s stamina bar (T again lands); jump climbs, sprint dives; no attacks while flying; drains 2× in combat |
+| Bloodbending | The Pale Lady, far southern hills: talk at night, 3 kills at night, return at night | Night only: seize one enemy within 10 m, root and drag them for 2 s (stronger at full moon). Order players lose a faction rank and get a bounty; Hollow Moon is exempt |
+| Spirit Projection | The Wanderer, Heart Hill: meditate 20 s at each of the 3 shrines | 15 s: body stays still and takes 50% more damage, a spirit camera roams up to 90 m and marks every enemy in range; T again returns |
+
+Not built yet: Lavabending stepping stones, metal-only targeting (needs armor/base parts from Phase 9) and the
+Combustion scroll drop (Phase 10). Faction rank exists as a number on the character (default 1) until Phase 11 gives
+it meaning.
+
 ## 9. Teams
 
 - **Parties** of up to 4 same-side players: shared XP within 50 m, party markers, combo moves (for example
   Water + Fire make a steam cloud that blinds).
+- **As built (Phase 7)**: invite with `I` while looking at a same-side player within 20 m; accept/decline with
+  `Y`/`N`. Kill XP is split among members within 50 m with +20% per extra member (dead members miss out). Combos
+  (`data/partyCombos.json`): Water + Fire steam (blinds: 50% miss chance), Earth + Fire magma (burn), Air + Fire
+  firestorm (burn), Water + Air blizzard (slow), Water + Earth mudslide (root), Air + Earth sandstorm (blinds). A
+  combo needs two different members' elements on one target within 2.5 s, then that target is immune for 6 s.
 - **Crews** (guilds) of up to 30 players, within one faction. They share a base, a bank and a crew rank.
 - Faction NPCs fight alongside you in territory wars, and you can hire 1 NPC companion.
 
@@ -163,6 +237,25 @@ The bonus is about 10%, so skill matters more than matchup.
 - The base core can be damaged but never fully deleted; losing a raid costs resources and loot.
 
 Building data goes in `data/buildings/*.json`.
+
+## 10a. Bending crafting (element combos)
+
+Players can build and craft *through bending*: combining two elements, or an element with something in the
+world, produces a material or a structure. Each character has one element, so most combos happen with a
+partner (party member or hired NPC companion); a few use the environment so solo players can join in.
+
+- **Party combos**: two players channel at the same spot within a short window (about 1.5 s). Examples:
+  Water + Earth → mud/fertile dirt (farm plots, mud walls, slows enemies), Fire + Water → steam (vents,
+  blinding cloud, powers machines), Fire + Earth → glass or magma brick, Air + Water → fog or ice crystals,
+  Air + Fire → super-heated forge (smelting metal), Earth + Air → sandstone or dust storm.
+- **Environment combos**: one element plus a world source: Fire on sand → glass, Water on a hot spring → steam,
+  Earth on ore nodes → refined ore, Air on ash → charcoal.
+- Results are either **materials** (go to inventory, used by bases, camps and gear) or **placed structures**
+  (bridges, walls, steam vents, farm plots) that snap to the building grid.
+- Same-side combos only; the server validates both casters, range and timing (server-authoritative like all building).
+- Combo strength scales with both casters' Bending Levels; matching Special Arts unlock upgraded recipes
+  (Metalbending → steel beams, Lavabending → obsidian).
+- All recipes live in `data/crafting/combos.json` (inputs, window, range, chi cost, output, quantity, cooldown).
 
 ## 11. Pets and mounts
 
@@ -188,13 +281,13 @@ Pet data goes in `data/pets/*.json`.
 
 1. **Foundations**: Vite + TS + Three.js WebGPU setup, stylized terrain, sky, day/night cycle, grass, quality presets, FPS/debug overlay.
 2. **Chunk streaming**: procedural chunk grid, load rings, prefetch, unload, Service Worker caching. Debug view shows chunk states.
-3. **Character**: third-person controller (walk, run, jump, dodge), camera, animations, Rapier physics.
+3. **Character**: third-person controller (walk, run, jump, dodge), camera, animations, Rapier physics. Settings menu with control rebinding and display name.
 4. **Bending v1**: one element (Fire) with 6 abilities, VFX, chi, block/counter, training-dummy NPCs. Then add the other three elements.
 5. **Multiplayer**: Colyseus shard rooms, join flow, spawn points, interpolation, server-authoritative hits, interest management.
 6. **Characters and factions**: account and character creation (element + faction picker), faction hubs, NPC members, safe/wild/contested zones, PvP flag.
-7. **Progression**: XP, levels, mastery trees, parties and shared XP, anti-griefing rules.
+7. **Progression**: XP, levels, mastery trees, parties and shared XP, anti-griefing rules. Party combat combos (e.g. steam blind).
 8. **Special Arts**: master NPCs and quests, then implement the arts one at a time.
-9. **Building**: camps, then crew bases, raid windows.
+9. **Building**: camps, then bending crafting (element combo recipes, section 10a), then crew bases, raid windows.
 10. **Pets**: common taming, then rare, then legendary world bosses and the Bond Trial.
 11. **Territory wars, crews, polish, deployment**: CDN, servers, monitoring.
 

@@ -1,0 +1,189 @@
+# Four Winds — engineering notes
+
+Browser elemental-bending open-world MMO. Design source of truth: [`docs/DESIGN.md`](docs/DESIGN.md).
+This file covers architecture, layout, conventions and the current phase. Update it when decisions change.
+
+## Current phase
+
+- **Phase 1 Foundations**: done (terrain, sky, day/night, grass, quality presets, debug overlay).
+- **Phase 2 Chunk streaming**: done (world build script, manifest + hashes, load rings, prefetch, unload, workers, Service Worker cache, LRU, chunk map).
+- **Phase 3 Character**: done (Rapier kinematic controller: walk/sprint/jump/dodge/swim/block stance, procedural primitive avatar, over-the-shoulder camera with terrain collision, settings menu with rebinding + display name, nameplate, F2 free camera).
+- **Phase 4 Bending v1**: done for all four elements (6 abilities each from `data/abilities/*.json`, chi, block +
+  perfect-block counter, dodge i-frames, statuses burn/slow/root/stagger, shields, element/time-of-day modifiers,
+  soft matchups, target assist, particle VFX with bloom, HUD, training + sparring dummies).
+- **Phase 5 Multiplayer**: done (Colyseus 0.16 shard rooms of 80, auto-assign or `?shard=<id>`, spawn points,
+  server-authoritative combat from `shared/sim`, movement validation with corrections, StateView interest
+  management, remote avatars interpolated ~110 ms behind, shared world clock, offline fallback, opt-in PvP flag
+  plumbing). Verified with `scripts/net-test.mjs` (two browsers).
+- **Phase 6 Characters/factions**: done (guest accounts upgradable to username/password, 4 character slots with
+  element + faction, PostgreSQL persistence with in-memory fallback, saved position on rejoin, 6 faction hubs with
+  walls/stalls/centrepieces, 7 NPC members per hub, safe/wild/contested zones, PvP flag on `P` with level gate,
+  spawn protection and low-level damage scaling). Verified with `scripts/phase6-test.mjs`.
+- **Phase 7 Progression**: done (XP from NPC/dummy/PvP kills and landmark discovery, levels 1-50 with +2% power
+  each, 3-branch mastery tree per element (1 point per level, tiered unlocks, free respec until gold exists),
+  crits/armor/chi-regen modifiers, parties of 4 with shared XP within 50 m, anti-griefing XP rules, 6 party combos
+  such as Water + Fire steam that blinds). Verified with `scripts/progression-check.ts` and `scripts/phase7-test.mjs`.
+- **Phase 8 Special Arts**: done (9 arts from `data/arts.json`: Healing, Lightning with redirect, Metal cable,
+  Lava pool -> rock wall, Combustion, Glider, Flight, night-only Bloodbending with faction penalty, Spirit
+  Projection; master NPCs with camps, step quests (talk/visit/kill/meditate), Arts panel `J` with quest compass,
+  Art slot `T`). Verified with `scripts/phase8-test.mjs`.
+- **Phase 9 Building**: next.
+- README.md is owned by a separate thread: don't edit it from build threads.
+
+## Run it
+
+```bash
+npm install
+npm run dev          # builds the world if world.json/props.json changed, then starts Vite on :5173
+npm run server       # shard server (Colyseus) on :2567 + /api; uses DATABASE_URL, else local Postgres, else memory
+npm run dev:all      # both of the above
+npm run build        # typecheck + production build into dist/
+npm run world -- --force   # regenerate client/public/world/ (gitignored, ~65 MB, ~15 s)
+npm run smoke        # headless Chromium smoke test against a running dev server (screenshots/)
+SCENARIO=stream npm run smoke   # fly across the world, then reload and check SW cache hits
+SCENARIO=character npm run smoke   # movement + settings menu (rename, rebind)
+SCENARIO=combat node scripts/smoke.mjs "http://localhost:5173/?offline"   # 4 elements vs dummies + perfect block (offline sim)
+node scripts/net-test.mjs          # two browsers on one shard: see each other, hits, PvP, speed-hack correction
+node scripts/phase6-test.mjs       # title screen, hub spawn, NPC talk, safe vs contested PvP, patrols, saved position
+npx tsx scripts/progression-check.ts   # XP/mastery/combo rules without a browser
+node scripts/phase7-test.mjs       # party invite, steam combo, shared XP, discovery level-up, mastery panel, saves
+node scripts/phase8-test.mjs       # Healing quest online, night-only Bloodbending, every other art offline
+```
+
+URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
+`?offline` (don't look for a server), `?server=ws://host:port`, `?shard=<roomId>`,
+`?char=Name&el=fire&fac=sentinel` (skip the title screen: pick or create that character; tests use it and
+`smoke.mjs` adds it by default).
+In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag, `K` mastery tree,
+`I` invite the player in front of you, `Y`/`N` answer an invite.
+
+## Stack (fixed by design)
+
+TypeScript + Vite, three.js `WebGPURenderer` (`three/webgpu`, auto WebGL2 fallback) with TSL node materials,
+Rapier (`@dimforge/rapier3d-compat`), Node + Colyseus 0.16 (`@colyseus/core`, `@colyseus/schema` 3 with
+StateView, `colyseus.js` client; versions pinned), later PostgreSQL.
+
+## Layout
+
+```
+client/              Vite root (index.html, src/, public/)
+  src/main.ts        bootstrap + main loop
+  src/engine/        renderer (+bloom pipeline), quality presets/auto-detect, input, cameras, service worker registration
+  src/world/         sky, day/night, materials (TSL), water, grass, props, chunk streamer/store/worker
+  src/game/          physics (Rapier), player controller, avatar, third-person camera, nameplate
+  src/game/combat/   host (CombatHost: LocalCombat offline), CombatView (sim events -> meshes/VFX), DummyView, abilities (input -> cast requests), VFX particles
+  src/game/remotePlayers.ts   avatars + nameplates for other players
+  src/world/hubs.ts  faction hub + shrine buildings (merged geometry, instanced lanterns, box colliders)
+  src/net/           NetCombat: Colyseus client, entity mirror + interpolation, move/cast messages
+  src/net/account.ts AccountClient: guest/register/login, character list (offline: localStorage roster)
+  src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog,
+                     progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), artsUi (arts panel + quest compass), CSS
+  public/sw.js       Service Worker (versioned chunk cache)
+  public/world/      GENERATED world chunks + manifest.json (gitignored)
+shared/              Pure TS used by client, workers, build scripts and (later) the server
+  noise.ts           seeded simplex/fbm/ridged
+  terrain.ts         TerrainSampler: height(x,z), biome colours, grassiness
+  chunkMesh.ts       chunk mesh builder (LOD + skirts), height-grid lookup
+  world.ts           chunk keys, file formats, manifest types
+  combat.ts          ability/element types, element power (day/night/moon/water/rock), matchups, level scaling
+  sim/combatSim.ts   AUTHORITATIVE combat rules (casts, projectiles, areas, hits, block/counter, statuses) -> SimEvents
+  sim/dummies.ts     training/sparring dummy AI
+  sim/npcs.ts        faction NPC members (vendors, trainers, envoys, guards, patrols)
+  factions.ts        factions, sides, zones (zoneAt), PvP numbers, hub flats -> terrainConfig(), hubSpawn
+  names.ts           name/username/password validation shared by client and server
+  arts.ts            Special Arts list, ArtsState, QuestRules (talk/visit/kill/meditate), quest status/compass target
+  progression.ts     XP curve, kill/discovery rewards (XpRules), mastery validation, Mods + modKit()
+  clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
+  net.ts             wire protocol types (move/cast/welcome/correct/events)
+server/              Node shard server: index.ts (HTTP /health, /shards, /api + Colyseus), worldRoom.ts, schema.ts
+  api.ts             account/character REST endpoints (rate-limited)
+  parties.ts         party/invite bookkeeping per shard
+  db/                Store interface: PgStore (migrations db/*.sql) and MemoryStore
+data/                ALL tunable numbers (JSON). Edit these, not code.
+  quality.json       Low/Medium/High presets (pixel ratio, shadows, grass, rings, LOD)
+  world.json         seed, chunk size (64 m), terrain shape, biome colours, grass, water
+  time.json          day length, moon cycle, lighting keyframes by hour
+  props.json         tree/rock/bush scatter rules
+  controls.json      default key bindings (players override in Settings, saved to localStorage `fw.settings`)
+  character.json     movement, dodge, swim and camera tuning
+  combat.json, abilities/*.json   bending numbers (Phase 4)
+  crafting/combos.json            element combo recipes (Phase 9)
+  net.json           tick/patch rates, shard size, interest radii, interpolation delay, movement tolerances
+  factions.json      factions, hub positions/styles/safe radius, NPC roster/levels/names
+  zones.json         contested shrines and PvP rules (flag level, spawn protection, low-level scaling)
+  accounts.json      character slots, session length, guest rate limit, save interval
+  progression.json   XP curve, kill/discovery XP, level factor, PvP repeat rules, party size/share radius
+  mastery.json       mastery trees (3 branches x 5 skills per element) and tier unlocks
+  partyCombos.json   party combo pairs (steam, magma, firestorm, blizzard, mud, sandstorm)
+  arts.json          Special Arts: level, master + camp spot, quest steps, the art's ability, glider/flight tuning
+scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
+docs/DESIGN.md       game design (keep in sync)
+```
+
+## Architecture notes
+
+- **Rendering**: `GameRenderer` wraps `WebGPURenderer`. Bloom runs via `RenderPipeline` with an MRT `emissive`
+  target, so only emissive things glow (sky discs now, VFX later). Materials that write custom MRT must use
+  `registerBloomSource()` — attaching an MRT node while bloom is off breaks WebGL draws.
+- **Look**: `MeshToonNodeMaterial` with a 4-step ramp (`TOON_RAMP`) + baked vertex colours; Neutral tone mapping.
+- **Day/night**: `DayNight` owns the game clock (`days`, `hour`, `moonPhase`, `nightFactor`), one directional
+  light that follows the sun by day and moon by night (texel-snapped shadow frustum), hemisphere light and fog.
+  `nightFactor`/`moonPhase` are what Water/Fire bonuses will read later.
+- **World streaming**: `scripts/build-world.ts` writes `manifest.json` (version + per-chunk hash) and per chunk
+  `{cx}_{cz}.bin` (65×65 int16 cm heights) + `.json` (props, npcSpawns, resourceNodes, basePlots). Chunk
+  coordinates: world `x = cx * 64`, the world is centred on 0,0. `.bin` stands in for the design's `.glb` until
+  real art exists; the manifest/hash/cache flow is the same.
+  `ChunkStore` = LRU → fetch (`?v=hash`) → Service Worker cache → server. `ChunkStreamer` computes rings
+  (near/mid/far from `quality.json`) with hysteresis, prioritises chunks ahead of travel, prefetches data along
+  the velocity, unloads beyond far+1.5, builds meshes in a worker pool and uploads a bounded number per frame.
+  Near chunks fire `onNear`/`onLeaveNear` hooks (physics colliders hang off these).
+- **Character**: `Player` runs a fixed 60 Hz step on Rapier's `KinematicCharacterController` and interpolates for
+  rendering. Terrain colliders are Rapier heightfields for near chunks only (column-major, rows along Z). If a
+  chunk's collider isn't loaded yet the player is held on the analytic ground. Input goes through `Controls`
+  (action ids from `controls.json`) so rebinding never touches gameplay code.
+- **Determinism**: terrain is a pure function of `world.json`; workers and the server use the same
+  `TerrainSampler`, so heights match everywhere.
+- **Combat authority**: `shared/sim/CombatSim` owns the rules and emits `SimEvent`s. The client talks to a
+  `CombatHost`: `LocalCombat` runs the sim in the tab (offline), `NetCombat` forwards casts to the shard and
+  mirrors server state. `CombatView` and the HUD only consume events and entity state, so they're identical
+  online and offline. Cooldowns are predicted client-side; `castFail` resets them.
+- **Multiplayer**: `WorldRoom` ticks the sim at 20 Hz. Clients send `move` (predicted position, aim, block,
+  dodge i-frame flag) at 20 Hz; the server checks speed (with allowances for dash/dodge/knockback), height and
+  bounds and answers `correct` when it rejects one. Blocking start is stamped server-side so perfect blocks are
+  authoritative. Knockback/pull come back as `imp`; nearby events as `ev`. Each client's StateView holds
+  entities within 3 chunks and drops them past 4. Dev servers accept a `tp` message (tests, free cam);
+  production (`NODE_ENV=production`) does not.
+- **Accounts**: `/api/guest` mints a guest account + session token (localStorage `fw.token`); register upgrades
+  it in place. Joining a room requires `{token, characterId}`; `onAuth` checks both and allows one live session
+  per character. Positions save on leave and every `saveEverySeconds`.
+- **Factions/zones**: `zoneAt(x,z)` is the single source for safe/wild/contested. `canHarm(a,b,time)` in the sim
+  applies all damage rules (same side, safe zone, spawn protection, contested vs flagged wilds). Hub and shrine
+  sites are levelled through `TerrainConfig.flats`, so every sampler must be built from `terrainConfig()`.
+- **Progression**: the authority (WorldRoom online, LocalCombat offline) owns a `Progress` per player and runs
+  `XpRules` on `death` events and a 1 s landmark check; clients only display `xp`/`progress` messages. Mastery is
+  sent as a whole allocation and always passed through `sanitizeAlloc`. `setMods(entity, computeMods(...))` turns
+  it into `entity.mods`; the sim reads abilities through `kitOf(entity)` (memoised `modKit`), so client cooldown
+  prediction uses the same numbers. Offline characters save progress to localStorage.
+- **Parties/combos**: `entity.party` is set by the room. `CombatSim.comboCheck` marks each party hit on a target;
+  a different element from another member within the window spawns the pair's combo area (`combo` event).
+- **Special Arts**: `Progress.arts` (learned, equipped, quests, bounty) is owned by the authority like XP.
+  `QuestRules` runs `talk` (client sends `quest:talk`, server checks the master is within 8 m), `onKill`, and a 1 s
+  `tick` for visit/meditate (meditate needs the player to stand still). The equipped art is `entity.art`, appended
+  to the kit by `kitOf` as slot `art`. New ability kinds in the sim: `heal`, `beam` (lightning), `pool` (lava ->
+  `Wall`), `grab` (blood), `flight`, `spirit`; `grapple` projectiles. Flight/spirit are toggles: recasting ends them
+  and the sim announces the end (`fly`/`spirit` with duration 0). The client runs the movement side (`Player.fly`,
+  glider, `frozen` during spirit). Dev shards accept `dev:xp` and `dev:clock` (shift the shard clock in hours).
+- **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
+  are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
+
+## Conventions
+
+- Tunable numbers go in `data/*.json`; code reads them via `@data/...` imports.
+- `@shared/*` must stay DOM-free (runs in Node and workers). It may import `three` math classes
+  (`Vector3`), never `three/webgpu` or anything that renders.
+- Prefer instancing / merged geometry; check draw calls in the F3 overlay. Budget: 60 FPS High on M4 Air, 30 FPS Low.
+- Placeholder art = primitives with vertex colours until mechanics are fun.
+- Verify each change in a headless browser (`npm run smoke`). Headless Chromium here has no GPU, so it runs
+  the WebGL2 backend on SwiftShader at 1-3 real FPS (sim dt is clamped to 0.1 s, so wait on `host.time`, not wall
+  time): judge correctness there, not performance.
+- Ask the owner before paid services, real accounts/payments or big irreversible choices.

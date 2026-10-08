@@ -1,0 +1,14 @@
+{
+  "_comment": "Party combo moves (DESIGN section 9): when a party member's element hits a target that another member hit with a different element within windowSeconds, the pair's combo bursts at the target. Areas hurt the party's enemies only. status types: burn | slow | root | stagger | blind.",
+  "windowSeconds": 2.5,
+  "targetCooldown": 6,
+  "combos": [
+    { "id": "steam", "name": "Steam Cloud", "elements": ["water", "fire"], "radius": 5, "duration": 4, "tick": 0.5, "damage": 4, "status": { "type": "blind", "duration": 1.5 }, "color": "#e8eef2" },
+    { "id": "magma", "name": "Magma Burst", "elements": ["earth", "fire"], "radius": 4, "duration": 3, "tick": 0.5, "damage": 7, "status": { "type": "burn", "duration": 3, "dps": 6 }, "color": "#ff6a2a" },
+    { "id": "firestorm", "name": "Firestorm", "elements": ["air", "fire"], "radius": 6, "duration": 3, "tick": 0.4, "damage": 6, "status": { "type": "burn", "duration": 2, "dps": 4 }, "color": "#ffb347" },
+    { "id": "blizzard", "name": "Blizzard", "elements": ["water", "air"], "radius": 6, "duration": 4, "tick": 0.5, "damage": 3, "status": { "type": "slow", "duration": 2, "amount": 0.5 }, "color": "#bfe6ff" },
+    { "id": "mud", "name": "Mudslide", "elements": ["water", "earth"], "radius": 5, "duration": 3, "tick": 0.5, "damage": 3, "status": { "type": "root", "duration": 1.2 }, "color": "#7a5a3a" },
+    { "id": "sandstorm", "name": "Sandstorm", "elements": ["air", "earth"], "radius": 6, "duration": 4, "tick": 0.5, "damage": 3, "status": { "type": "blind", "duration": 1.5 }, "color": "#d8c08a" }
+  ],
+  "blind": { "_comment": "Blinded attackers miss this share of their hits.", "missChance": 0.5 }
+}

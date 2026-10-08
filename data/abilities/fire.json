@@ -1,0 +1,12 @@
+{
+  "element": "fire",
+  "_comment": "Fire: burst damage, stronger in daytime and at noon. kind = projectile | melee | dash | shield | ring | cone. Damage before level/element modifiers.",
+  "abilities": [
+    { "slot": "basic",    "id": "fire_jab",      "name": "Fire Jab",      "kind": "projectile", "damage": 9,  "chiCost": 0,  "cooldown": 0.32, "range": 28, "speed": 42, "radius": 0.35, "combo": 3, "comboBonus": 0.5, "vfx": "fire_bolt", "anim": "jab" },
+    { "slot": "heavy",    "id": "fire_blast",    "name": "Fire Blast",    "kind": "projectile", "damage": 34, "chiCost": 22, "cooldown": 4,    "range": 34, "speed": 30, "radius": 0.8, "splash": 3, "knockback": 6, "windup": 0.25, "vfx": "fire_blast", "anim": "heavy" },
+    { "slot": "mobility", "id": "jet_dash",      "name": "Jet Dash",      "kind": "dash",       "damage": 0,  "chiCost": 15, "cooldown": 5,    "distance": 11, "duration": 0.32, "trail": "fire_trail", "vfx": "fire_jet", "anim": "dash" },
+    { "slot": "defense",  "id": "fire_shield",   "name": "Fire Shield",   "kind": "shield",     "damage": 6,  "chiCost": 18, "cooldown": 9,    "duration": 2.5, "reduction": 0.6, "blocksProjectiles": true, "radius": 1.6, "vfx": "fire_shield", "anim": "guard" },
+    { "slot": "control",  "id": "flame_ring",    "name": "Flame Ring",    "kind": "ring",       "damage": 6,  "chiCost": 25, "cooldown": 10,   "radius": 6, "duration": 4, "tick": 0.5, "status": { "type": "burn", "duration": 3, "dps": 4 }, "vfx": "flame_ring", "anim": "stomp" },
+    { "slot": "ultimate", "id": "inferno_breath","name": "Inferno Breath","kind": "cone",       "damage": 14, "chiCost": 60, "cooldown": 40,   "range": 12, "angle": 40, "duration": 2.5, "tick": 0.25, "status": { "type": "burn", "duration": 4, "dps": 6 }, "vfx": "inferno", "anim": "breath" }
+  ]
+}

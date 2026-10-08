@@ -1,0 +1,62 @@
+{
+  "_comment": "World generation and streaming. chunkSize is fixed by design at 64 m.",
+  "seed": 1337,
+  "chunkSize": 64,
+  "worldChunks": 64,
+  "seaLevel": 0,
+  "terrain": {
+    "baseHeight": 6,
+    "continentScale": 900,
+    "continentAmplitude": 30,
+    "hillScale": 180,
+    "hillAmplitude": 14,
+    "detailScale": 36,
+    "detailAmplitude": 1.6,
+    "mountainScale": 520,
+    "mountainAmplitude": 95,
+    "mountainThreshold": 0.45,
+    "warpScale": 300,
+    "warpAmount": 80,
+    "edgeFalloff": 0.12,
+    "edgeDepth": -40
+  },
+  "biomes": {
+    "sandMaxHeight": 2.2,
+    "grassMaxHeight": 48,
+    "snowMinHeight": 78,
+    "rockSlope": 0.62
+  },
+  "colors": {
+    "sand": "#e8d39a",
+    "grassLow": "#6fb04a",
+    "grassHigh": "#9bc65a",
+    "dirt": "#9a7a4e",
+    "rock": "#8a8478",
+    "rockDark": "#6c675f",
+    "snow": "#f3f6fb",
+    "seabed": "#c7b787"
+  },
+  "grass": {
+    "tuftsPerSquareMeter": 1.3,
+    "bladesPerTuft": 4,
+    "bladeHeight": [
+      0.28,
+      0.55
+    ],
+    "bladeWidth": 0.09,
+    "baseColor": "#3f7a2a",
+    "tipColor": "#b5dd6a",
+    "windStrength": 0.35,
+    "windSpeed": 1.6,
+    "windScale": 0.08
+  },
+  "water": {
+    "shallowColor": "#4fc1d6",
+    "deepColor": "#1f5f9e",
+    "opacity": 0.82
+  },
+  "spawn": {
+    "x": 0,
+    "z": 0
+  }
+}

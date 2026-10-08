@@ -1,0 +1,98 @@
+{
+  "_comment": "Mastery trees (DESIGN section 7): 3 branches per element, 1 point per level. A node of tier t needs tierPoints[t] points already spent in its branch. effects are per rank. Slot-scoped keys (dmg, cd, chi, radius, range, status, dot, duration, knock) apply to 'slots' or to every slot if omitted: dmg = +damage, cd = -cooldown, chi = -chi cost, radius = +area/splash/shield size, range = +range and dash distance, status = +status duration, dot = +burn dps / slow amount, duration = +area/shield duration, knock = +knockback. Global keys: crit (chance), hp (+max health), maxChi (flat), regen (+chi regen), armor (-damage taken).",
+  "tierPoints": [0, 5, 10, 15],
+  "trees": {
+    "fire": [
+      { "id": "precision", "name": "Precision", "text": "Critical hits and reach", "nodes": [
+        { "id": "fire_p1", "name": "Steady Hands", "tier": 0, "max": 5, "text": "+3% critical chance", "effects": { "crit": 0.03 } },
+        { "id": "fire_p2", "name": "Long Reach", "tier": 1, "max": 5, "text": "+6% range", "effects": { "range": 0.06 } },
+        { "id": "fire_p3", "name": "Focused Jab", "tier": 1, "max": 5, "text": "+5% Fire Jab damage", "effects": { "dmg": 0.05, "slots": ["basic"] } },
+        { "id": "fire_p4", "name": "Killer Instinct", "tier": 2, "max": 5, "text": "+2% critical chance, +4% Fire Blast damage", "effects": { "crit": 0.02, "dmg": 0.04, "slots": ["heavy"] } },
+        { "id": "fire_p5", "name": "Heart of the Sun", "tier": 3, "max": 1, "text": "+15% damage with every ability", "effects": { "dmg": 0.15 } }
+      ] },
+      { "id": "inferno", "name": "Inferno", "text": "Area damage and burns", "nodes": [
+        { "id": "fire_i1", "name": "Kindling", "tier": 0, "max": 5, "text": "+8% burn damage", "effects": { "dot": 0.08 } },
+        { "id": "fire_i2", "name": "Wide Flames", "tier": 1, "max": 5, "text": "+6% area size", "effects": { "radius": 0.06 } },
+        { "id": "fire_i3", "name": "Searing", "tier": 1, "max": 5, "text": "+8% burn duration", "effects": { "status": 0.08 } },
+        { "id": "fire_i4", "name": "Blaze", "tier": 2, "max": 5, "text": "+5% Flame Ring and Inferno Breath damage", "effects": { "dmg": 0.05, "slots": ["control", "ultimate"] } },
+        { "id": "fire_i5", "name": "Wildfire", "tier": 3, "max": 1, "text": "Inferno Breath: -20% cooldown, +25% duration", "effects": { "cd": 0.2, "duration": 0.25, "slots": ["ultimate"] } }
+      ] },
+      { "id": "breath", "name": "Breath", "text": "Chi efficiency and sustain", "nodes": [
+        { "id": "fire_b1", "name": "Breath Control", "tier": 0, "max": 5, "text": "-4% chi cost", "effects": { "chi": 0.04 } },
+        { "id": "fire_b2", "name": "Second Wind", "tier": 1, "max": 5, "text": "+8% chi regeneration", "effects": { "regen": 0.08 } },
+        { "id": "fire_b3", "name": "Inner Fire", "tier": 1, "max": 5, "text": "+3% max health", "effects": { "hp": 0.03 } },
+        { "id": "fire_b4", "name": "Calm Flame", "tier": 2, "max": 5, "text": "-3% cooldowns", "effects": { "cd": 0.03 } },
+        { "id": "fire_b5", "name": "Dragon's Breath", "tier": 3, "max": 1, "text": "+25 max chi", "effects": { "maxChi": 25 } }
+      ] }
+    ],
+    "water": [
+      { "id": "tide", "name": "Tide", "text": "Whips and spikes", "nodes": [
+        { "id": "water_t1", "name": "Quick Whip", "tier": 0, "max": 5, "text": "+5% Water Whip damage", "effects": { "dmg": 0.05, "slots": ["basic"] } },
+        { "id": "water_t2", "name": "Long Whip", "tier": 1, "max": 5, "text": "+6% range", "effects": { "range": 0.06 } },
+        { "id": "water_t3", "name": "Sharp Ice", "tier": 1, "max": 5, "text": "+5% Ice Spikes damage", "effects": { "dmg": 0.05, "slots": ["heavy"] } },
+        { "id": "water_t4", "name": "Undertow", "tier": 2, "max": 5, "text": "+2% critical chance, +8% knockback", "effects": { "crit": 0.02, "knock": 0.08 } },
+        { "id": "water_t5", "name": "Ocean's Fury", "tier": 3, "max": 1, "text": "+15% damage with every ability", "effects": { "dmg": 0.15 } }
+      ] },
+      { "id": "frost", "name": "Frost", "text": "Slows, roots and freezes", "nodes": [
+        { "id": "water_f1", "name": "Chill", "tier": 0, "max": 5, "text": "+6% slow strength", "effects": { "dot": 0.06 } },
+        { "id": "water_f2", "name": "Deep Freeze", "tier": 1, "max": 5, "text": "+8% status duration", "effects": { "status": 0.08 } },
+        { "id": "water_f3", "name": "Wider Waves", "tier": 1, "max": 5, "text": "+6% area size", "effects": { "radius": 0.06 } },
+        { "id": "water_f4", "name": "Glacier", "tier": 2, "max": 5, "text": "-4% Freeze and Tidal Surge cooldown", "effects": { "cd": 0.04, "slots": ["control", "ultimate"] } },
+        { "id": "water_f5", "name": "Winter's Grip", "tier": 3, "max": 1, "text": "Freeze: +30% duration and size", "effects": { "status": 0.3, "radius": 0.3, "slots": ["control"] } }
+      ] },
+      { "id": "flow", "name": "Flow", "text": "Sustain and recovery", "nodes": [
+        { "id": "water_w1", "name": "Still Water", "tier": 0, "max": 5, "text": "+3% max health", "effects": { "hp": 0.03 } },
+        { "id": "water_w2", "name": "Current", "tier": 1, "max": 5, "text": "+8% chi regeneration", "effects": { "regen": 0.08 } },
+        { "id": "water_w3", "name": "Light Touch", "tier": 1, "max": 5, "text": "-4% chi cost", "effects": { "chi": 0.04 } },
+        { "id": "water_w4", "name": "Ice Skin", "tier": 2, "max": 5, "text": "-2% damage taken", "effects": { "armor": 0.02 } },
+        { "id": "water_w5", "name": "Moonlit Pool", "tier": 3, "max": 1, "text": "Ice Wall lasts 40% longer", "effects": { "duration": 0.4, "slots": ["defense"] } }
+      ] }
+    ],
+    "earth": [
+      { "id": "boulder", "name": "Boulder", "text": "Heavy hits", "nodes": [
+        { "id": "earth_b1", "name": "Rock Throw", "tier": 0, "max": 5, "text": "+5% Rock Throw damage", "effects": { "dmg": 0.05, "slots": ["basic"] } },
+        { "id": "earth_b2", "name": "Crushing Weight", "tier": 1, "max": 5, "text": "+5% Boulder Smash damage", "effects": { "dmg": 0.05, "slots": ["heavy"] } },
+        { "id": "earth_b3", "name": "Momentum", "tier": 1, "max": 5, "text": "+8% knockback", "effects": { "knock": 0.08 } },
+        { "id": "earth_b4", "name": "Fault Lines", "tier": 2, "max": 5, "text": "+2% critical chance, +4% range", "effects": { "crit": 0.02, "range": 0.04 } },
+        { "id": "earth_b5", "name": "Mountain's Weight", "tier": 3, "max": 1, "text": "+15% damage with every ability", "effects": { "dmg": 0.15 } }
+      ] },
+      { "id": "bastion", "name": "Bastion", "text": "Armor and health", "nodes": [
+        { "id": "earth_s1", "name": "Stone Skin", "tier": 0, "max": 5, "text": "+4% max health", "effects": { "hp": 0.04 } },
+        { "id": "earth_s2", "name": "Bedrock", "tier": 1, "max": 5, "text": "-2% damage taken", "effects": { "armor": 0.02 } },
+        { "id": "earth_s3", "name": "Thick Armor", "tier": 1, "max": 5, "text": "Stone Armor lasts 10% longer", "effects": { "duration": 0.1, "slots": ["defense"] } },
+        { "id": "earth_s4", "name": "Patient Stone", "tier": 2, "max": 5, "text": "+8% chi regeneration", "effects": { "regen": 0.08 } },
+        { "id": "earth_s5", "name": "Unbreakable", "tier": 3, "max": 1, "text": "-10% damage taken", "effects": { "armor": 0.1 } }
+      ] },
+      { "id": "quake", "name": "Quake", "text": "Roots and zone control", "nodes": [
+        { "id": "earth_q1", "name": "Tremor", "tier": 0, "max": 5, "text": "+6% area size", "effects": { "radius": 0.06 } },
+        { "id": "earth_q2", "name": "Deep Roots", "tier": 1, "max": 5, "text": "+8% status duration", "effects": { "status": 0.08 } },
+        { "id": "earth_q3", "name": "Seismic Sense", "tier": 1, "max": 5, "text": "-4% chi cost", "effects": { "chi": 0.04 } },
+        { "id": "earth_q4", "name": "Aftershock", "tier": 2, "max": 5, "text": "+5% Quake Root and Earthquake Ring damage", "effects": { "dmg": 0.05, "slots": ["control", "ultimate"] } },
+        { "id": "earth_q5", "name": "Tectonic Shift", "tier": 3, "max": 1, "text": "Earthquake Ring: -20% cooldown, +25% size", "effects": { "cd": 0.2, "radius": 0.25, "slots": ["ultimate"] } }
+      ] }
+    ],
+    "air": [
+      { "id": "gale", "name": "Gale", "text": "Cutting wind", "nodes": [
+        { "id": "air_g1", "name": "Razor Wind", "tier": 0, "max": 5, "text": "+5% Air Slice damage", "effects": { "dmg": 0.05, "slots": ["basic"] } },
+        { "id": "air_g2", "name": "Sharp Eyes", "tier": 1, "max": 5, "text": "+3% critical chance", "effects": { "crit": 0.03 } },
+        { "id": "air_g3", "name": "Cannon Blast", "tier": 1, "max": 5, "text": "+10% knockback", "effects": { "knock": 0.1 } },
+        { "id": "air_g4", "name": "Crosswind", "tier": 2, "max": 5, "text": "+5% Air Cannon damage, +4% range", "effects": { "dmg": 0.05, "range": 0.04, "slots": ["heavy"] } },
+        { "id": "air_g5", "name": "Eye of the Storm", "tier": 3, "max": 1, "text": "+15% damage with every ability", "effects": { "dmg": 0.15 } }
+      ] },
+      { "id": "zephyr", "name": "Zephyr", "text": "Speed and mobility", "nodes": [
+        { "id": "air_z1", "name": "Light Feet", "tier": 0, "max": 5, "text": "+6% dash distance", "effects": { "range": 0.06, "slots": ["mobility"] } },
+        { "id": "air_z2", "name": "Tailwind", "tier": 1, "max": 5, "text": "-6% mobility cooldown", "effects": { "cd": 0.06, "slots": ["mobility"] } },
+        { "id": "air_z3", "name": "Quick Mind", "tier": 1, "max": 5, "text": "-3% cooldowns", "effects": { "cd": 0.03 } },
+        { "id": "air_z4", "name": "Vortex", "tier": 2, "max": 5, "text": "+6% area size", "effects": { "radius": 0.06 } },
+        { "id": "air_z5", "name": "Tornado Rider", "tier": 3, "max": 1, "text": "Tornado: -20% cooldown, +25% duration", "effects": { "cd": 0.2, "duration": 0.25, "slots": ["ultimate"] } }
+      ] },
+      { "id": "calm", "name": "Calm", "text": "Chi and evasion", "nodes": [
+        { "id": "air_c1", "name": "Meditation", "tier": 0, "max": 5, "text": "+8% chi regeneration", "effects": { "regen": 0.08 } },
+        { "id": "air_c2", "name": "Empty Mind", "tier": 1, "max": 5, "text": "-4% chi cost", "effects": { "chi": 0.04 } },
+        { "id": "air_c3", "name": "Soft Breeze", "tier": 1, "max": 5, "text": "+3% max health", "effects": { "hp": 0.03 } },
+        { "id": "air_c4", "name": "Bubble", "tier": 2, "max": 5, "text": "Air Bubble lasts 10% longer and is 6% larger", "effects": { "duration": 0.1, "radius": 0.06, "slots": ["defense"] } },
+        { "id": "air_c5", "name": "Weightless", "tier": 3, "max": 1, "text": "+25 max chi", "effects": { "maxChi": 25 } }
+      ] }
+    ]
+  }
+}
