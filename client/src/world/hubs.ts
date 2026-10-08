@@ -8,7 +8,7 @@ import { registerBloomSource } from '../engine/renderer';
 import type { Physics } from '../game/physics';
 
 /** Collects coloured primitives and merges them into one draw call. */
-class Builder {
+export class Builder {
   private parts: THREE.BufferGeometry[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -43,10 +43,10 @@ class Builder {
   }
 }
 
-const BOX = new THREE.BoxGeometry(1, 1, 1);
-const ROOF4 = new THREE.ConeGeometry(0.75, 1, 4, 1).rotateY(Math.PI / 4);
-const CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
-const TENT = new THREE.ConeGeometry(1, 1, 6, 1);
+export const BOX = new THREE.BoxGeometry(1, 1, 1);
+export const ROOF4 = new THREE.ConeGeometry(0.75, 1, 4, 1).rotateY(Math.PI / 4);
+export const CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+export const TENT = new THREE.ConeGeometry(1, 1, 6, 1);
 const FLAG = new THREE.PlaneGeometry(1, 1);
 
 const STYLE = {

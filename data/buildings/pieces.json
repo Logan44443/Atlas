@@ -1,0 +1,23 @@
+{
+  "_comment": "Camp and base pieces (design section 10). size = [width, height, depth] in metres. A camp starts with a campfire (the core); every other piece must stand within rules.campRadius of your own campfire. solid pieces block movement and projectiles. tier: wood -> stone -> metal (spirit-warded comes later). effect: respawn (campfire), storage (chest), forge (forge recipes), vent (steam cloud that blinds enemies), shrine (+XP for your element), walkway (bridge/floor you can stand on).",
+  "pieces": [
+    { "id": "campfire",      "name": "Campfire",          "kind": "core",    "size": [1.6, 0.8, 1.6], "hp": 600,  "cost": { "wood": 5, "stone": 3 },             "solid": false, "effect": "respawn", "tier": "wood" },
+    { "id": "tent",          "name": "Tent",              "kind": "deco",    "size": [3, 2.4, 3],     "hp": 200,  "cost": { "wood": 6 },                         "solid": true,  "tier": "wood" },
+    { "id": "chest",         "name": "Storage chest",     "kind": "station", "size": [1.2, 0.8, 0.8], "hp": 300,  "cost": { "wood": 8 },                         "solid": true,  "effect": "storage", "tier": "wood" },
+    { "id": "wood_wall",     "name": "Wood wall",         "kind": "wall",    "size": [4, 3, 0.4],     "hp": 300,  "cost": { "wood": 6 },                         "solid": true,  "tier": "wood" },
+    { "id": "wood_gate",     "name": "Wood gate",         "kind": "gate",    "size": [4, 3, 0.4],     "hp": 260,  "cost": { "wood": 8 },                         "solid": false, "tier": "wood" },
+    { "id": "stone_wall",    "name": "Stone wall",        "kind": "wall",    "size": [4, 3, 0.6],     "hp": 800,  "cost": { "stone": 8 },                        "solid": true,  "tier": "stone" },
+    { "id": "mud_wall",      "name": "Mud wall",          "kind": "wall",    "size": [4, 2.4, 0.8],   "hp": 450,  "cost": { "mud": 4 },                          "solid": true,  "tier": "stone" },
+    { "id": "brick_wall",    "name": "Magma brick wall",  "kind": "wall",    "size": [4, 3, 0.6],     "hp": 1100, "cost": { "magma_brick": 4, "stone": 2 },      "solid": true,  "tier": "stone" },
+    { "id": "obsidian_wall", "name": "Obsidian wall",     "kind": "wall",    "size": [4, 3, 0.6],     "hp": 1500, "cost": { "obsidian": 4 },                     "solid": true,  "tier": "stone" },
+    { "id": "metal_wall",    "name": "Metal wall",        "kind": "wall",    "size": [4, 3.4, 0.4],   "hp": 2000, "cost": { "metal_plate": 3, "steel_beam": 1 }, "solid": true,  "tier": "metal" },
+    { "id": "watchtower",    "name": "Watchtower",        "kind": "tower",   "size": [3, 7, 3],       "hp": 1200, "cost": { "wood": 10, "stone": 10 },           "solid": true,  "tier": "stone" },
+    { "id": "sandstone_bridge", "name": "Sandstone bridge", "kind": "floor", "size": [3, 0.5, 8],     "hp": 600,  "cost": { "sandstone": 6 },                    "solid": true,  "effect": "walkway", "tier": "stone" },
+    { "id": "glass_window",  "name": "Glass window wall", "kind": "wall",    "size": [4, 3, 0.3],     "hp": 350,  "cost": { "glass": 3, "wood": 2 },             "solid": true,  "tier": "stone" },
+    { "id": "steam_vent",    "name": "Steam vent",        "kind": "trap",    "size": [1.4, 0.6, 1.4], "hp": 400,  "cost": { "steam_core": 2, "stone": 2 },       "solid": false, "effect": "vent", "tier": "stone" },
+    { "id": "forge",         "name": "Forge",             "kind": "station", "size": [2.4, 2, 2],     "hp": 900,  "cost": { "stone": 10, "magma_brick": 2 },     "solid": true,  "effect": "forge", "tier": "stone" },
+    { "id": "ice_lantern",   "name": "Ice lantern",       "kind": "deco",    "size": [0.6, 1.8, 0.6], "hp": 150,  "cost": { "ice_crystal": 1, "wood": 1 },       "solid": false, "tier": "wood" },
+    { "id": "element_shrine", "name": "Element shrine",   "kind": "shrine",  "size": [2, 2.6, 2],     "hp": 900,  "cost": { "stone": 12, "glass": 2 },           "solid": true,  "effect": "shrine", "tier": "stone" },
+    { "id": "training_dummy", "name": "Training post",    "kind": "deco",    "size": [0.8, 1.9, 0.8], "hp": 300,  "cost": { "wood": 4 },                         "solid": true,  "tier": "wood" }
+  ]
+}

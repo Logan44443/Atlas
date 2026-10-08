@@ -16,6 +16,7 @@ import { zoneAt, PVP } from '../factions';
 import { modKit, modAbility, NO_MODS, PROG, type Mods } from '../progression';
 import artsData from '../../data/arts.json';
 import comboData from '../../data/partyCombos.json';
+import type { Solid } from '../building';
 
 export interface PartyCombo {
   id: string;
@@ -172,7 +173,11 @@ export type SimEvent =
   | { t: 'impulse'; target: string; v: [number, number, number] }
   | { t: 'death'; target: string; source: string | null }
   | { t: 'respawn'; target: string }
-  | { t: 'castFail'; caster: string; slot: Slot; reason: string };
+  | { t: 'castFail'; caster: string; slot: Slot; reason: string }
+  // Phase 9: bending that reaches a structure (the host applies raid rules and turns it into 'struct').
+  | { t: 'structHit'; id: string; source: string; amount: number; element: ElementId; pos: [number, number, number] }
+  | { t: 'struct'; id: string; hp: number; maxHp: number; pos: [number, number, number]; broke: boolean; source: string | null }
+  | { t: 'craft'; recipe: string; name: string; pos: [number, number, number]; members: string[] };
 
 interface Projectile {
   id: number;
@@ -304,6 +309,11 @@ function distToCapsule(e: SimEntity, p: Vector3): number {
   return Math.hypot(p.x - e.pos.x, p.y - y, p.z - e.pos.z) - e.radius;
 }
 
+/** Is `p` within `r` of a structure's box? (Boxes sit on their base y.) */
+function inBox(st: Solid, p: Vector3, r: number): boolean {
+  return Math.abs(p.x - st.x) < st.hx + r && Math.abs(p.z - st.z) < st.hz + r && p.y > st.y - r && p.y < st.y + st.hy * 2 + r;
+}
+
 export class CombatSim {
   readonly entities = new Map<string, SimEntity>();
   readonly projectiles: Projectile[] = [];
@@ -315,6 +325,8 @@ export class CombatSim {
   events: SimEvent[] = [];
   time = 0;
   private nextId = 1;
+  /** Camp structures (Phase 9): solid ones stop projectiles; players' bending can hit them all. */
+  solids: Map<string, Solid> = new Map();
 
   constructor(private groundAt: (x: number, z: number) => number) {}
 
@@ -600,6 +612,8 @@ export class CombatSim {
     const o = center(owner);
     const flat = dir.clone().setY(0).normalize();
     this.events.push({ t: 'melee', owner: owner.id, element, pos: arr(o), dir: arr(flat), range, angle: ability.angle ?? 60 });
+    const reach = tmp.copy(o).addScaledVector(flat, range * 0.6);
+    for (const st of this.solids.values()) if (inBox(st, reach, range * 0.5)) this.structHit(owner, st, ability, element, power, reach);
     for (const t of this.enemiesOf(owner)) {
       const c = center(t, new Vector3());
       tmp.subVectors(c, o);
@@ -612,6 +626,12 @@ export class CombatSim {
   }
 
   // ---- hits -----------------------------------------------------------------
+
+  /** Players' bending reaching an enemy structure; the host decides whether it counts. */
+  private structHit(src: SimEntity, st: Solid, ability: AbilityDef, element: ElementId, power: number, at: Vector3): void {
+    if (src.kind !== 'player' || !src.side || src.side === st.side || ability.damage <= 0) return;
+    this.events.push({ t: 'structHit', id: st.id, source: src.id, amount: Math.round(ability.damage * power), element, pos: arr(at) });
+  }
 
   hit(src: SimEntity, target: SimEntity, ability: AbilityDef, element: ElementId, power: number, dir: Vector3, proj: Projectile | null): 'hit' | 'reflected' | 'avoided' {
     if (target.dead) return 'avoided';
@@ -803,6 +823,11 @@ export class CombatSim {
     }
     for (const w of this.walls) if (Math.hypot(p.pos.x - w.pos.x, p.pos.z - w.pos.z) < w.radius && p.pos.y < w.pos.y + 3) return true;
     const pr = p.ability.radius ?? 0.4;
+    for (const st of this.solids.values()) {
+      if (!st.solid || !inBox(st, p.pos, pr)) continue;
+      this.structHit(p.owner, st, p.ability, p.element, p.power, p.pos);
+      return true;
+    }
     const c = new Vector3();
     for (const t of this.entities.values()) {
       if (t.dead || !canHarm(p.owner, t, this.time)) continue;
@@ -846,6 +871,7 @@ export class CombatSim {
 
   private splash(p: Projectile): void {
     const r = p.ability.splash!;
+    for (const st of this.solids.values()) if (inBox(st, p.pos, r)) this.structHit(p.owner, st, p.ability, p.element, p.power, p.pos);
     for (const t of this.entities.values()) {
       if (t.dead || !canHarm(p.owner, t, this.time)) continue;
       if (distToCapsule(t, p.pos) <= r) this.hit(p.owner, t, p.ability, p.element, p.power, tmp.subVectors(t.pos, p.pos).clone(), null);
@@ -888,6 +914,12 @@ export class CombatSim {
       while (a.tickAcc >= tick) {
         a.tickAcc -= tick;
         const o = handOf(a.owner, a.dir);
+        if (a.kind === 'ring') {
+          const r = ab.radius ?? 5;
+          for (const st of this.solids.values()) {
+            if (Math.abs(st.x - a.center.x) < st.hx + r && Math.abs(st.z - a.center.z) < st.hz + r) this.structHit(a.owner, st, ab, a.element, a.power, a.center);
+          }
+        }
         for (const t of this.enemiesOf(a.owner)) {
           if (a.kind === 'ring') {
             const d = Math.hypot(t.pos.x - a.center.x, t.pos.z - a.center.z);

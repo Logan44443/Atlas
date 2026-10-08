@@ -7,6 +7,9 @@ import { spawnDummies, updateDummy, type DummyBrain } from '@shared/sim/dummies'
 import { spawnNpcs, spawnMasters, updateNpc, type NpcBrain } from '@shared/sim/npcs';
 import { QuestRules, sanitizeArts, equippedAbility, artById, ARTS, masterId, type QuestNews } from '@shared/arts';
 import characterData from '@data/character.json';
+import { Camps, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory } from '@shared/building';
+import { CraftRules, type Crafter } from '@shared/crafting';
+import { milestoneXp, shrineBonus } from '@shared/campRules';
 
 /** Where combat rules run: in this tab (offline) or on the shard server (online). */
 export interface CombatHost {
@@ -35,6 +38,18 @@ export interface CombatHost {
   talkTo(npcId: string): void;
   equipArt(id: string | null): void;
 
+  // Camps and bending crafting (Phase 9).
+  /** structures the authority has told us about (a mirror online) */
+  readonly camps: Camps;
+  /** the character id that owns this player's camp */
+  readonly charId: string;
+  place(piece: string, x: number, z: number, rot: number): void;
+  removeStruct(id: string): void;
+  channel(): void;
+  gather(nodeId: string | null): void;
+  forge(recipe: string): void;
+  chest(id: string, items: Inventory, put: boolean): void;
+
   // Parties (online only).
   readonly party: PartyInfo | null;
   readonly invites: InviteMsg[];
@@ -55,6 +70,8 @@ export function applyArtsToEntity(e: SimEntity, p: Progress): void {
   e.art = equippedAbility(p.arts);
   e.canRedirect = p.arts.learned.includes('lightning');
 }
+
+const CAMPS_KEY = 'fw.camps';
 
 export interface XpGain {
   amount: number;
@@ -89,6 +106,9 @@ export class LocalCombat implements CombatHost {
   private stillFrom = new THREE.Vector3();
   private self: XpPlayer;
   private slowT = 0;
+  readonly camps: Camps;
+  charId = 'local';
+  private crafts = new CraftRules();
 
   constructor(name: string, element: SimEntity['element'], spawn: { x: number; z: number }, private groundAt: (x: number, z: number) => number, progress?: Partial<Progress>) {
     this.sim = new CombatSim(groundAt);
@@ -103,6 +123,76 @@ export class LocalCombat implements CombatHost {
     this.self = { entity: this.me, progress: this.progress, respawnedAt: 0 };
     this.brains = spawnDummies(this.sim, spawn, groundAt);
     this.npcs = [...spawnNpcs(this.sim, groundAt), ...spawnMasters(this.sim, groundAt)];
+    this.progress.inv = sanitizeInv(progress?.inv);
+    this.progress.milestones = Array.isArray(progress?.milestones) ? [...progress.milestones] : [];
+    // Offline camps live in this browser.
+    this.camps = new Camps(groundAt);
+    try {
+      this.camps.load(JSON.parse(localStorage.getItem(CAMPS_KEY) ?? '[]'));
+    } catch {
+      /* no saved camps */
+    }
+    this.sim.solids = this.camps.solids;
+    this.camps.listen(() => {
+      try {
+        localStorage.setItem(CAMPS_KEY, JSON.stringify([...this.camps.all.values()]));
+      } catch {
+        /* storage full or blocked */
+      }
+    });
+  }
+
+  private builder(): Builder {
+    const e = this.me;
+    return { charId: this.charId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: this.progress.inv };
+  }
+  private crafter(): Crafter {
+    return { entity: this.me, charId: this.charId, inv: this.progress.inv, arts: this.progress.arts.learned };
+  }
+
+  /** Tests: give materials, force the raid window. */
+  devGive(items: Inventory): void {
+    giveItems(this.progress.inv, sanitizeInv(items, 1e6));
+  }
+  devRaid(on: boolean | null): void {
+    this.camps.forceRaid = on;
+  }
+
+  place(piece: string, x: number, z: number, rot: number): void {
+    const r = this.camps.place(this.builder(), { piece, x, z, rot });
+    if (typeof r === 'string') return void this.notices.push({ text: r, warn: true });
+    this.notices.push({ text: `Built ${pieceById(r.piece)!.name}` });
+    for (const a of milestoneXp(this.progress, this.camps, this.charId, r)) this.grant(a.amount, a.reason);
+  }
+  removeStruct(id: string): void {
+    const r = this.camps.remove(this.builder(), id);
+    this.notices.push(typeof r === 'string' ? { text: r, warn: true } : { text: `Took down ${pieceById(r.piece)!.name}` });
+  }
+  channel(): void {
+    const r = this.crafts.channel(this.crafter(), [], this.sim.time);
+    if (r.kind === 'waiting') return void this.notices.push({ text: r.text });
+    if (r.kind === 'failed') return void this.notices.push({ text: r.reason, warn: true });
+    const cr = r.crafted;
+    this.sim.events.push({ t: 'craft', recipe: cr.recipe, name: cr.name, pos: cr.pos, members: [this.me.id] });
+    const g = cr.gains[0];
+    this.notices.push(Object.keys(g.items).length ? { text: `${cr.name}: +${itemsText(g.items)}` } : { text: 'Your bag is full', warn: true });
+    this.grant(g.xp, `bent ${cr.name}`);
+  }
+  gather(nodeId: string | null): void {
+    const r = this.crafts.gather(this.crafter(), nodeId, this.sim.time);
+    this.notices.push(typeof r === 'string' ? { text: r, warn: true } : { text: r.text });
+  }
+  forge(recipe: string): void {
+    const r = this.crafts.forge(this.crafter(), recipe, this.camps);
+    this.notices.push(typeof r === 'string' ? { text: r, warn: true } : { text: r.text });
+  }
+  chest(id: string, items: Inventory, put: boolean): void {
+    const c = this.camps.all.get(id);
+    if (!c?.store || c.owner !== this.charId) return;
+    if (Math.hypot(c.x - this.me.pos.x, c.z - this.me.pos.z) > 5) return void this.notices.push({ text: 'Get closer to the chest', warn: true });
+    const err = moveItems(this.progress.inv, c.store, sanitizeInv(items, 1e6), put);
+    if (err) this.notices.push({ text: err, warn: true });
+    this.camps.upsert(c);
   }
 
   talkTo(npcId: string): void {
@@ -149,6 +239,7 @@ export class LocalCombat implements CombatHost {
   kick(): void {}
 
   private grant(amount: number, reason: string): void {
+    amount = Math.round(amount * shrineBonus(this.camps, this.me));
     const levelUp = addXp(this.progress, amount);
     if (levelUp) {
       this.me.level = this.progress.level;

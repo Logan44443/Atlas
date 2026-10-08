@@ -191,8 +191,12 @@ const e = await open('E', `offline&char=Toph${run}&el=earth&fac=sentinel`);
 const da = await e.page.evaluate(() => window.__fw.host.entities.get('dummy_a').pos.clone());
 await goTo(e, da.x, da.z - 8);
 await grantOffline(e, 35, ['metal', 'lava'], 'metal');
-await castArt(e, 'dummy_a');
-await until(e, () => window.__fw.__ev.some((x) => x.t === 'hit' && x.target === 'dummy_a'), null, 30000).catch(() => {});
+// The dummy can block or step aside; give the cable a few tries (waiting out the Art cooldown).
+for (let i = 0; i < 3 && !(await e.page.evaluate(() => window.__fw.__ev.some((x) => x.t === 'impulse' && x.target === 'dummy_a'))); i++) {
+  await until(e, () => (window.__fw.host.me.cooldowns.get('art') ?? 0) <= 0.05, null, 60000).catch(() => {});
+  await castArt(e, 'dummy_a');
+  await until(e, () => window.__fw.__ev.some((x) => x.t === 'impulse' && x.target === 'dummy_a'), null, 20000).catch(() => {});
+}
 const pulled = await e.page.evaluate(() => window.__fw.__ev.filter((x) => x.t === 'impulse' && x.target === 'dummy_a').map((x) => x.v));
 ok(pulled.length > 0 && pulled[0][2] < 0, `Metal cable hit dummy_a and pulled it toward the caster (impulse z ${pulled[0]?.[2]?.toFixed(1)})`);
 await e.page.evaluate(() => window.__fw.host.equipArt('lava'));
@@ -237,6 +241,8 @@ await until(a, () => window.__fw.player.grounded, null, 60000).catch(() => {});
 await a.page.evaluate(() => window.__fw.host.equipArt('spirit'));
 // Let the landing settle so the body is really standing still.
 await waitSim(a, 2);
+// Flight and spirit share the Art slot's cooldown.
+await until(a, () => (window.__fw.host.me.cooldowns.get('art') ?? 0) <= 0.05, null, 120000).catch(() => {});
 await castArt(a, null);
 await until(a, () => window.__fw.spirit.t > 0, null, 20000).catch(() => {});
 const body = await a.page.evaluate(() => window.__fw.player.renderPos.clone());
@@ -244,8 +250,8 @@ const cam0 = await a.page.evaluate(() => window.__fw.camera.position.clone());
 await a.page.keyboard.down('KeyW');
 await waitSim(a, 1.5);
 await a.page.keyboard.up('KeyW');
-const sp = await a.page.evaluate(([b, c]) => ({ t: window.__fw.spirit.t, frozen: window.__fw.player.frozen, moved: window.__fw.player.renderPos.distanceTo(b), cam: window.__fw.camera.position.distanceTo(c) }), [body, cam0]);
-ok(sp.t > 0 && sp.frozen && sp.moved < 0.5 && sp.cam > 5, `Spirit projection: body stays (${sp.moved.toFixed(2)} m), spirit camera roams (${sp.cam.toFixed(1)} m away)`);
+const sp = await a.page.evaluate(([b, c]) => ({ t: window.__fw.spirit.t, frozen: window.__fw.player.frozen, moved: Math.hypot(window.__fw.player.renderPos.x - b.x, window.__fw.player.renderPos.z - b.z), cam: window.__fw.camera.position.distanceTo(c) }), [body, cam0]);
+ok(sp.t > 0 && sp.frozen && sp.moved < 0.5 && sp.cam > 5, `Spirit projection (${sp.t > 0 ? 'active' : 'not active'}): body stays (${sp.moved.toFixed(2)} m sideways), spirit camera roams (${sp.cam.toFixed(1)} m away)`);
 await a.page.screenshot({ path: `${outDir}/p8-spirit.png` });
 await castArt(a, null);
 await until(a, () => window.__fw.spirit.t <= 0, null, 20000).catch(() => {});

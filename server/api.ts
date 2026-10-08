@@ -13,6 +13,7 @@ import accountData from '../data/accounts.json';
 import { validateName, validatePassword, validateUsername } from '../shared/names';
 import { FACTIONS, type FactionId } from '../shared/factions';
 import type { ElementId } from '../shared/combat';
+import { removeOwner } from './camps';
 import { StoreError, type Account, type Store } from './db/store';
 
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -132,6 +133,7 @@ export function createApi(store: Store) {
     if (m === 'DELETE' && del) {
       const { account } = await requireAccount(req);
       if (!(await store.deleteCharacter(account.id, del[1]))) throw new HttpError(404, 'No such character');
+      removeOwner(del[1]);
       return { ok: true };
     }
     throw new HttpError(404, 'Not found');

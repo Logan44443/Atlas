@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 import type { ElementId } from '../../shared/combat';
 import type { FactionId } from '../../shared/factions';
+import type { Structure } from '../../shared/building';
 
 export interface Account {
   id: string;
@@ -30,6 +31,9 @@ export interface CharacterRow {
   discovered: string[];
   /** Special Arts state (see shared/arts.ts ArtsState) */
   arts: unknown;
+  /** materials carried and building milestones (Phase 9) */
+  inv: Record<string, number>;
+  milestones: string[];
   createdAt: string;
 }
 
@@ -41,6 +45,8 @@ export interface CharacterSave {
   mastery?: Record<string, number>;
   discovered?: string[];
   arts?: unknown;
+  inv?: Record<string, number>;
+  milestones?: string[];
 }
 
 export class StoreError extends Error {
@@ -64,6 +70,10 @@ export interface Store {
   getCharacter(id: string): Promise<CharacterRow | null>;
   renameCharacter(id: string, name: string): Promise<void>;
   saveCharacter(id: string, s: CharacterSave): Promise<void>;
+  /** Camp structures (Phase 9). */
+  loadStructures(): Promise<Structure[]>;
+  saveStructures(list: Structure[]): Promise<void>;
+  deleteStructures(ids: string[]): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -85,6 +95,8 @@ const toChar = (r: Row): CharacterRow => ({
   mastery: (r.mastery as Record<string, number>) ?? {},
   discovered: (r.discovered as string[]) ?? [],
   arts: r.arts ?? {},
+  inv: (r.inv as Record<string, number>) ?? {},
+  milestones: (r.milestones as string[]) ?? [],
   createdAt: new Date(r.created_at as string).toISOString(),
 });
 const toAccount = (r: Row): Account => ({ id: r.id as string, username: r.username as string, guest: r.guest as boolean });
@@ -214,13 +226,36 @@ export class PgStore implements Store {
          x = COALESCE($2, x), y = COALESCE($3, y), z = COALESCE($4, z),
          level = COALESCE($5, level), xp = COALESCE($6, xp), faction_rank = COALESCE($7, faction_rank),
          mastery = COALESCE($8::jsonb, mastery), discovered = COALESCE($9::jsonb, discovered), arts = COALESCE($10::jsonb, arts),
+         inv = COALESCE($11::jsonb, inv), milestones = COALESCE($12::jsonb, milestones),
          last_seen = now()
        WHERE id = $1`,
       [
         id, s.pos?.[0] ?? null, s.pos?.[1] ?? null, s.pos?.[2] ?? null, s.level ?? null, s.xp ?? null, s.rank ?? null,
         s.mastery ? JSON.stringify(s.mastery) : null, s.discovered ? JSON.stringify(s.discovered) : null, s.arts ? JSON.stringify(s.arts) : null,
+        s.inv ? JSON.stringify(s.inv) : null, s.milestones ? JSON.stringify(s.milestones) : null,
       ],
     );
+  }
+
+  async loadStructures(): Promise<Structure[]> {
+    const r = await this.pool.query('SELECT data FROM structures');
+    return r.rows.map((x) => x.data as Structure);
+  }
+
+  async saveStructures(list: Structure[]): Promise<void> {
+    if (!list.length) return;
+    // One upsert per batch; the owner FK drops structures of deleted characters.
+    await this.pool.query(
+      `INSERT INTO structures (id, owner, data, updated_at)
+       SELECT x.id, x.owner::uuid, x.data, now() FROM jsonb_to_recordset($1::jsonb) AS x(id text, owner text, data jsonb)
+       WHERE EXISTS (SELECT 1 FROM characters c WHERE c.id = x.owner::uuid)
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [JSON.stringify(list.map((s) => ({ id: s.id, owner: s.owner, data: s })))],
+    );
+  }
+
+  async deleteStructures(ids: string[]): Promise<void> {
+    if (ids.length) await this.pool.query('DELETE FROM structures WHERE id = ANY($1::text[])', [ids]);
   }
 
   async close(): Promise<void> {
@@ -235,6 +270,7 @@ export class MemoryStore implements Store {
   private accounts = new Map<string, { account: Account; passHash: string | null }>();
   private sessions = new Map<string, { accountId: string; expires: number }>();
   private chars = new Map<string, CharacterRow>();
+  private structs = new Map<string, Structure>();
 
   private byName(username: string) {
     for (const a of this.accounts.values()) if (a.account.username.toLowerCase() === username.toLowerCase()) return a;
@@ -278,13 +314,14 @@ export class MemoryStore implements Store {
   async createCharacter(accountId: string, c: { name: string; element: ElementId; faction: FactionId }, maxSlots: number): Promise<CharacterRow> {
     if ((await this.listCharacters(accountId)).length >= maxSlots) throw new StoreError('slots_full', `All ${maxSlots} character slots are used`);
     for (const o of this.chars.values()) if (o.name.toLowerCase() === c.name.toLowerCase()) throw new StoreError('name_taken', 'That name is taken');
-    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], arts: {}, createdAt: new Date().toISOString() };
+    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], arts: {}, inv: {}, milestones: [], createdAt: new Date().toISOString() };
     this.chars.set(row.id, row);
     return row;
   }
   async deleteCharacter(accountId: string, id: string): Promise<boolean> {
     const c = this.chars.get(id);
     if (!c || c.accountId !== accountId) return false;
+    for (const st of this.structs.values()) if (st.owner === id) this.structs.delete(st.id);
     return this.chars.delete(id);
   }
   async getCharacter(id: string): Promise<CharacterRow | null> {
@@ -305,6 +342,18 @@ export class MemoryStore implements Store {
     if (s.level !== undefined) c.level = s.level;
     if (s.xp !== undefined) c.xp = s.xp;
     if (s.rank !== undefined) c.rank = s.rank;
+    if (s.inv) c.inv = { ...s.inv };
+    if (s.milestones) c.milestones = [...s.milestones];
+  }
+
+  async loadStructures(): Promise<Structure[]> {
+    return [...this.structs.values()].map((s) => JSON.parse(JSON.stringify(s)));
+  }
+  async saveStructures(list: Structure[]): Promise<void> {
+    for (const s of list) if (this.chars.has(s.owner)) this.structs.set(s.id, JSON.parse(JSON.stringify(s)));
+  }
+  async deleteStructures(ids: string[]): Promise<void> {
+    for (const id of ids) this.structs.delete(id);
   }
   async close(): Promise<void> {}
 }

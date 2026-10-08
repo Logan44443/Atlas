@@ -51,6 +51,10 @@ export class Physics {
     return this.world.createCollider(desc);
   }
 
+  removeCollider(c: RAPIER.Collider): void {
+    this.world.removeCollider(c, false);
+  }
+
   hasTerrainAt(x: number, z: number, size: number): boolean {
     return this.terrain.has(chunkKey(Math.floor(x / size), Math.floor(z / size)));
   }

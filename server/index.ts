@@ -9,10 +9,12 @@ import { NET, ROOM_NAME } from '../shared/net';
 import { WorldRoom } from './worldRoom';
 import { openStore } from './db/store';
 import { createApi } from './api';
+import { initCamps, flushCamps } from './camps';
 
 const port = Number(process.env.PORT ?? NET.port);
 const store = await openStore();
 WorldRoom.store = store;
+await initCamps(store);
 const api = createApi(store);
 
 const httpServer = http.createServer(async (req, res) => {
@@ -38,3 +40,5 @@ gameServer.define(ROOM_NAME, WorldRoom);
 
 await gameServer.listen(port);
 console.log(`Four Winds shard server on :${port}`);
+// Write pending camp changes before exiting (rooms have saved their players by then).
+gameServer.onShutdown(() => flushCamps());

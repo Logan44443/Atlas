@@ -24,6 +24,8 @@
     { "id": "artsPanel",    "label": "Special Arts & quests", "group": "Interface", "keys": ["KeyJ"] },
     { "id": "acceptInvite", "label": "Accept party invite", "group": "Interface", "keys": ["KeyY"] },
     { "id": "declineInvite","label": "Decline party invite", "group": "Interface", "keys": ["KeyN"] },
+    { "id": "build",        "label": "Camp: build & bag",  "group": "Interface", "keys": ["KeyB"] },
+    { "id": "channel",      "label": "Channel (bend-craft)", "group": "Bending", "keys": ["KeyC"] },
     { "id": "freeCamera",   "label": "Debug free camera",  "group": "Interface", "keys": ["F2"] }
   ],
   "reserved": ["Escape", "F3", "F4", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"],

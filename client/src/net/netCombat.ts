@@ -6,6 +6,7 @@ import { NET, ROOM_NAME, type CorrectMsg, type InviteMsg, type JoinOptions, type
 import { computeMods, newProgress, type Progress } from '@shared/progression';
 import { applyArtsToEntity, createPlayerEntity, PLAYER_SHAPE, type CombatHost, type QuestLine, type XpGain } from '../game/combat/host';
 import { sideOf } from '@shared/factions';
+import { Camps, type Inventory, type Structure } from '@shared/building';
 
 /** What the client reads from a replicated entity (see server/schema.ts). */
 interface EntityStateView {
@@ -97,6 +98,11 @@ export class NetCombat implements CombatHost {
   party: PartyInfo | null = null;
   readonly invites: InviteMsg[] = [];
   readonly questLines: QuestLine[] = [];
+  /** Height of the ground (set by main), for client-side placement checks. */
+  groundAt: (x: number, z: number) => number = () => 0;
+  /** Mirror of the structures the shard streams to us. */
+  readonly camps = new Camps((x, z) => this.groundAt(x, z));
+  readonly charId: string;
 
   private constructor(
     readonly room: Room<WorldStateView>,
@@ -106,6 +112,7 @@ export class NetCombat implements CombatHost {
     private player: { swimming: boolean },
   ) {
     this.shard = welcome.shard;
+    this.charId = welcome.characterId;
     this.clockOffset = welcome.serverTime - Date.now();
     this.me = createPlayerEntity(welcome.id, name, element);
     this.me.pos.set(...welcome.spawn);
@@ -126,6 +133,12 @@ export class NetCombat implements CombatHost {
     });
     room.onMessage('invite', (m: InviteMsg) => this.invites.push(m));
     room.onMessage('quest', (m: QuestLine) => this.questLines.push(m));
+    room.onMessage('structs', (list: Structure[]) => {
+      for (const st of list) this.camps.upsert(st);
+    });
+    room.onMessage('structDel', (ids: string[]) => {
+      for (const id of ids) this.camps.delete(id);
+    });
     room.onMessage('pong', (m: { t: number; s: number }) => {
       const now = Date.now();
       this.rtt = now - m.t;
@@ -194,6 +207,35 @@ export class NetCombat implements CombatHost {
     this.me.level = p.level;
     setMods(this.me, computeMods(this.me.element, p.mastery));
     applyArtsToEntity(this.me, p);
+  }
+
+  place(piece: string, x: number, z: number, rot: number): void {
+    if (!this.closed) this.room.send('build:place', { piece, x, z, rot });
+  }
+  removeStruct(id: string): void {
+    if (!this.closed) this.room.send('build:remove', id);
+  }
+  channel(): void {
+    if (!this.closed) this.room.send('craft:channel');
+  }
+  gather(nodeId: string | null): void {
+    if (!this.closed) this.room.send('gather', nodeId);
+  }
+  forge(recipe: string): void {
+    if (!this.closed) this.room.send('forge', recipe);
+  }
+  chest(id: string, items: Inventory, put: boolean): void {
+    if (!this.closed) this.room.send('chest', { id, items, put });
+  }
+  /** Tests: force the raid window open/shut (dev shards only). */
+  devRaid(on: boolean | null): void {
+    if (!this.closed) this.room.send('dev:raid', on);
+  }
+  devClearCamp(): void {
+    if (!this.closed) this.room.send('dev:clearCamp');
+  }
+  devGive(items: Inventory): void {
+    if (!this.closed) this.room.send('dev:give', items);
   }
 
   talkTo(npcId: string): void {

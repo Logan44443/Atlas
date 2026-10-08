@@ -46,13 +46,18 @@ import { XpHud, MasteryPanel, PartyUi } from './ui/progressUi';
 import { PROG, type Progress } from '@shared/progression';
 import { ArtsPanel } from './ui/artsUi';
 import { artById } from '@shared/arts';
+import { StructureView, ResourceView } from './world/campView';
+import { BuildPanel } from './ui/buildUi';
+import { campRespawn } from '@shared/campRules';
+import { sanitizeInv } from '@shared/building';
 
 const HELP = `Click to capture mouse, Esc for settings
 WASD move, Shift sprint, Space jump, V dodge
 LMB basic, Q E R F X abilities, Tab target
 Hold right mouse: block (time it to counter)
 T special art  J arts & quests  K mastery
-I invite to party  G talk  P PvP flag
+B camp & bag  C channel (bend-craft)
+I invite to party  G talk/gather  P PvP flag
 F2 free camera  F3 overlay  F4/M chunk map`;
 
 function setLoading(text: string, frac: number) {
@@ -163,12 +168,14 @@ async function main() {
   const savedProgress = {
     level: character.level, xp: character.xp ?? 0, mastery: character.mastery ?? {}, discovered: character.discovered ?? [],
     arts: character.arts as Progress['arts'] | undefined, rank: character.rank ?? 1,
+    inv: sanitizeInv(character.inv), milestones: character.milestones ?? [],
   } as Partial<Progress>;
   const makeLocal = (at: THREE.Vector3, progress: Partial<Progress> = savedProgress) => {
     const lc = new LocalCombat(who.name, who.element, spawn, groundAt, progress);
     lc.me.faction = who.faction;
     lc.me.side = sideOf(who.faction) ?? '';
     lc.me.pos.copy(at);
+    lc.charId = character.id;
     return lc;
   };
   const swimState = { swimming: false };
@@ -177,6 +184,7 @@ async function main() {
     try {
       const net = await NetCombat.connect(defaultServerUrl(), { token: account.token, characterId: character.id }, who, swimState, params.get('shard'));
       host = net;
+      net.groundAt = groundAt;
       netStatus = `shard ${net.shard}`;
       start = net.me.pos.clone();
       console.info(`[net] joined ${netStatus} as ${net.me.id}`);
@@ -232,6 +240,18 @@ async function main() {
   const dialog = new NpcDialog();
   dialog.onTalk = (e) => host.talkTo(e.id);
   const artsPanel = new ArtsPanel(() => host, () => updateHint(), () => keyOf('art'));
+  // Camps (Phase 9): structures, resource nodes and the camp panel.
+  const structView = new StructureView(physics);
+  scene.add(structView.group);
+  structView.bind(host.camps);
+  const nodeView = new ResourceView(groundAt);
+  scene.add(nodeView.group);
+  const build = new BuildPanel(
+    () => host, scene, groundAt,
+    () => ({ build: keyOf('build'), interact: keyOf('interact'), channel: keyOf('channel'), place: keyOf('basic'), rotate: keyOf('defense') }),
+    () => updateHint(),
+    () => input.requestPointerLock(),
+  );
   // Spirit projection: the body stays put, a free camera roams within range and enemies are revealed.
   const spirit = { t: 0, range: 0, origin: new THREE.Vector3() };
   const spiritVeil = document.createElement('div');
@@ -366,7 +386,7 @@ async function main() {
         if (e.target === me.id) {
           if (host.online) player.teleport(me.pos.x, me.pos.z);
           else {
-            const h = hubSpawn(character.faction);
+            const h = campRespawn(host.camps, host.charId) ?? hubSpawn(character.faction);
             player.teleport(h.x, h.z);
           }
         }
@@ -377,6 +397,7 @@ async function main() {
   function goOffline(reason: string) {
     netStatus = `offline (${reason})`;
     host = makeLocal(player.renderPos.clone(), host.progress);
+    structView.bind(host.camps);
     abilities.setElement(settings.data.element);
     console.info(`[net] ${netStatus}`);
   }
@@ -390,6 +411,7 @@ async function main() {
       account.saveLocalCharacter(character.id, {
         pos: [player.renderPos.x, player.renderPos.y, player.renderPos.z], name: settings.data.name,
         level: p.level, xp: p.xp, mastery: p.mastery, discovered: p.discovered, arts: p.arts, rank: p.rank,
+        inv: p.inv, milestones: p.milestones,
       });
     }
   };
@@ -443,7 +465,7 @@ async function main() {
   crosshair.className = 'crosshair hidden';
   document.body.appendChild(crosshair);
   function updateHint() {
-    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || freeCam);
+    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || freeCam);
     crosshair.classList.toggle('hidden', !input.pointerLocked);
   }
   gr.renderer.domElement.addEventListener('click', () => {
@@ -457,7 +479,7 @@ async function main() {
   Object.assign(window, {
     __fw: {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
-      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal, artsPanel, spirit,
+      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal, artsPanel, spirit, build, structView, nodeView,
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -512,7 +534,7 @@ async function main() {
       if (freeCam && spirit.t <= 0) fly.update(dt);
       if (!me.dead) player.update(dt, tpc.yaw);
       syncMe();
-      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen) abilities.update(dt, me.blocking);
+      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy) abilities.update(dt, me.blocking);
       for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
       if (host instanceof NetCombat) {
         for (const c of host.corrections.splice(0)) {
@@ -528,6 +550,12 @@ async function main() {
       xpHud.update(dt, host.progress);
       if (controls.pressed('mastery')) mastery.toggle();
       if (controls.pressed('artsPanel')) artsPanel.toggle();
+      // Camp: B opens the panel (or cancels placing), C channels, LMB/R place and rotate the ghost.
+      const buildKey = controls.pressed('build');
+      if (buildKey && !build.placing) build.toggle();
+      build.update(tpc.yaw, { place: controls.pressed('basic'), rotate: controls.pressed('defense'), cancel: buildKey || me.dead });
+      if (controls.pressed('channel') && !build.busy && !freeCam) host.channel();
+      nodeView.update(player.renderPos.x, player.renderPos.z);
       artsPanel.update(camera, player.renderPos.x, player.renderPos.z);
       for (const l of host.questLines.splice(0)) dialog.say(l.npc, l.line);
       updateReveal();
@@ -542,7 +570,11 @@ async function main() {
       zoneHud.pvp = me.pvp;
       zoneHud.update(dt, player.renderPos.x, player.renderPos.z);
       const interactKey = settings.data.bindings.interact?.[0];
-      dialog.update(dialog.nearest(host.entities.values(), player.renderPos.x, player.renderPos.z), controls.pressed('interact'), interactKey ? keyLabel(interactKey) : 'Interact');
+      const npc = dialog.nearest(host.entities.values(), player.renderPos.x, player.renderPos.z);
+      const interact = controls.pressed('interact');
+      dialog.update(npc, interact && !!npc, interactKey ? keyLabel(interactKey) : 'Interact');
+      // No one to talk to: gather, or open your chest / the forge.
+      if (interact && !npc && !build.busy) build.interact();
       if (controls.pressed('pvpFlag')) togglePvp();
       syncEntityViews();
       for (const v of dummyViews.values()) v.update(dt);

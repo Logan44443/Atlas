@@ -1,21 +1,22 @@
 {
-  "_comment": "Bending crafting recipes (design section 10a). Party combos need two casters channelling within windowSeconds and rangeMeters of each other. Environment combos need one caster plus a world source. Implemented in Phase 9.",
+  "_comment": "Bending crafting recipes (design section 10a). Channel (C) to bend-craft. Party combos: two same-side players of the listed elements channel within windowSeconds and rangeMeters of each other; both get the output. Environment combos: channel within sourceRange metres of a resource node of that source type. Upgrades swap the output when either caster knows the Special Art (art id). xp is the reward per craft.",
+  "sourceRange": 6,
   "party": [
-    { "id": "mud",       "elements": ["water", "earth"], "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 20, "cooldown": 4,  "output": { "material": "mud", "qty": 3 },        "structure": "mud_wall" },
-    { "id": "steam",     "elements": ["fire", "water"],  "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 20, "cooldown": 6,  "output": { "material": "steam_core", "qty": 1 }, "structure": "steam_vent" },
-    { "id": "glass",     "elements": ["fire", "earth"],  "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 25, "cooldown": 6,  "output": { "material": "magma_brick", "qty": 2 }, "structure": "brick_wall" },
-    { "id": "fog",       "elements": ["air", "water"],   "windowSeconds": 1.5, "rangeMeters": 8, "chiCost": 15, "cooldown": 8,  "output": { "material": "ice_crystal", "qty": 2 }, "structure": null },
-    { "id": "forge",     "elements": ["air", "fire"],    "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 30, "cooldown": 10, "output": { "material": "forge_heat", "qty": 1 }, "structure": "forge" },
-    { "id": "sandstone", "elements": ["earth", "air"],   "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 20, "cooldown": 6,  "output": { "material": "sandstone", "qty": 3 },  "structure": "sandstone_bridge" }
+    { "id": "mud",       "name": "Mud",            "elements": ["water", "earth"], "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 20, "cooldown": 4,  "output": { "material": "mud", "qty": 3 },         "xp": 10 },
+    { "id": "steam",     "name": "Steam core",     "elements": ["fire", "water"],  "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 20, "cooldown": 6,  "output": { "material": "steam_core", "qty": 1 },  "xp": 10 },
+    { "id": "glass",     "name": "Magma brick",    "elements": ["fire", "earth"],  "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 25, "cooldown": 6,  "output": { "material": "magma_brick", "qty": 2 }, "xp": 10 },
+    { "id": "fog",       "name": "Ice crystal",    "elements": ["air", "water"],   "windowSeconds": 1.5, "rangeMeters": 8, "chiCost": 15, "cooldown": 8,  "output": { "material": "ice_crystal", "qty": 2 }, "xp": 10 },
+    { "id": "forge",     "name": "Forge heat",     "elements": ["air", "fire"],    "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 30, "cooldown": 10, "output": { "material": "forge_heat", "qty": 1 },  "xp": 10 },
+    { "id": "sandstone", "name": "Sandstone",      "elements": ["earth", "air"],   "windowSeconds": 1.5, "rangeMeters": 6, "chiCost": 20, "cooldown": 6,  "output": { "material": "sandstone", "qty": 3 },   "xp": 10 }
   ],
   "environment": [
-    { "id": "sand_glass",   "element": "fire",  "source": "sand",       "chiCost": 15, "cooldown": 5, "output": { "material": "glass", "qty": 1 } },
-    { "id": "spring_steam", "element": "water", "source": "hot_spring", "chiCost": 10, "cooldown": 5, "output": { "material": "steam_core", "qty": 1 } },
-    { "id": "ore_refine",   "element": "earth", "source": "ore_node",   "chiCost": 15, "cooldown": 5, "output": { "material": "refined_ore", "qty": 1 } },
-    { "id": "ash_charcoal", "element": "air",   "source": "ash_pile",   "chiCost": 10, "cooldown": 5, "output": { "material": "charcoal", "qty": 2 } }
+    { "id": "sand_glass",   "name": "Glass",       "element": "fire",  "source": "sand",       "chiCost": 15, "cooldown": 5, "output": { "material": "glass", "qty": 1 },       "xp": 4 },
+    { "id": "spring_steam", "name": "Steam core",  "element": "water", "source": "hot_spring", "chiCost": 10, "cooldown": 5, "output": { "material": "steam_core", "qty": 1 },  "xp": 4 },
+    { "id": "ore_refine",   "name": "Refined ore", "element": "earth", "source": "ore_node",   "chiCost": 15, "cooldown": 5, "output": { "material": "refined_ore", "qty": 1 }, "xp": 4 },
+    { "id": "ash_charcoal", "name": "Charcoal",    "element": "air",   "source": "ash_pile",   "chiCost": 10, "cooldown": 5, "output": { "material": "charcoal", "qty": 2 },    "xp": 4 }
   ],
   "upgrades": [
-    { "recipe": "glass", "requiresArt": "lavabending",  "output": { "material": "obsidian", "qty": 2 } },
-    { "recipe": "forge", "requiresArt": "metalbending", "output": { "material": "steel_beam", "qty": 1 } }
+    { "recipe": "glass", "requiresArt": "lava",  "output": { "material": "obsidian", "qty": 2 } },
+    { "recipe": "forge", "requiresArt": "metal", "output": { "material": "steel_beam", "qty": 1 } }
   ]
 }
