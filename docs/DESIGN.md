@@ -115,6 +115,25 @@ Elemental matchups are soft, not rock-paper-scissors: Water's freeze slows Fire,
 ground (it loses its grounded bonus), Earth's walls block Fire projectiles, and Fire burns away Air's barriers.
 The bonus is about 10%, so skill matters more than matchup.
 
+## 6a. Controls and settings
+
+Default PC layout (third-person action, keyboard + mouse):
+
+| Action | Default |
+|---|---|
+| Move / sprint / jump / dodge | WASD / hold Shift / Space / V (or double-tap a direction) |
+| Camera | Mouse (click to capture, Esc releases), wheel zoom |
+| Basic / Heavy / Control / Defense / Mobility / Ultimate | Left click / Q / E / R / F / X |
+| Block (perfect timing = counter) | Hold right click |
+| Cycle target / interact | Tab / G |
+
+- **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
+  mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
+  and mouse sensitivity / invert-Y.
+- Defaults live in `data/controls.json`. Player overrides are saved locally now, and to the account once accounts
+  exist (Phase 6), where the server also validates names (length, allowed characters, uniqueness, profanity filter).
+- Gamepad support arrives with combat (Phase 4); touch controls (virtual stick + ability buttons) in the polish phase.
+
 ## 7. XP and progression
 
 - XP sources: NPC kills, quests, PvP kills (scaled by level difference), territory captures, taming, building
@@ -207,7 +226,7 @@ Pet data goes in `data/pets/*.json`.
 
 1. **Foundations**: Vite + TS + Three.js WebGPU setup, stylized terrain, sky, day/night cycle, grass, quality presets, FPS/debug overlay.
 2. **Chunk streaming**: procedural chunk grid, load rings, prefetch, unload, Service Worker caching. Debug view shows chunk states.
-3. **Character**: third-person controller (walk, run, jump, dodge), camera, animations, Rapier physics.
+3. **Character**: third-person controller (walk, run, jump, dodge), camera, animations, Rapier physics. Settings menu with control rebinding and display name.
 4. **Bending v1**: one element (Fire) with 6 abilities, VFX, chi, block/counter, training-dummy NPCs. Then add the other three elements.
 5. **Multiplayer**: Colyseus shard rooms, join flow, spawn points, interpolation, server-authoritative hits, interest management.
 6. **Characters and factions**: account and character creation (element + faction picker), faction hubs, NPC members, safe/wild/contested zones, PvP flag.
