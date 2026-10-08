@@ -1,0 +1,26 @@
+{
+  "_comment": "Default key bindings. Codes are KeyboardEvent.code values, or Mouse0/Mouse1/Mouse2 (left/middle/right). Each action can have up to 2 bindings. Players rebind in Settings; their overrides are saved separately.",
+  "actions": [
+    { "id": "moveForward",  "label": "Move forward",       "group": "Movement", "keys": ["KeyW", "ArrowUp"] },
+    { "id": "moveBack",     "label": "Move back",          "group": "Movement", "keys": ["KeyS", "ArrowDown"] },
+    { "id": "moveLeft",     "label": "Move left",          "group": "Movement", "keys": ["KeyA", "ArrowLeft"] },
+    { "id": "moveRight",    "label": "Move right",         "group": "Movement", "keys": ["KeyD", "ArrowRight"] },
+    { "id": "sprint",       "label": "Sprint (hold)",      "group": "Movement", "keys": ["ShiftLeft"] },
+    { "id": "jump",         "label": "Jump",               "group": "Movement", "keys": ["Space"] },
+    { "id": "dodge",        "label": "Dodge",              "group": "Movement", "keys": ["KeyV"] },
+    { "id": "basic",        "label": "Basic attack",       "group": "Bending",  "keys": ["Mouse0"] },
+    { "id": "heavy",        "label": "Heavy",              "group": "Bending",  "keys": ["KeyQ"] },
+    { "id": "control",      "label": "Control",            "group": "Bending",  "keys": ["KeyE"] },
+    { "id": "defense",      "label": "Defense",            "group": "Bending",  "keys": ["KeyR"] },
+    { "id": "mobility",     "label": "Mobility",           "group": "Bending",  "keys": ["KeyF"] },
+    { "id": "ultimate",     "label": "Ultimate",           "group": "Bending",  "keys": ["KeyX"] },
+    { "id": "block",        "label": "Block / counter (hold)", "group": "Bending", "keys": ["Mouse2"] },
+    { "id": "target",       "label": "Cycle target",       "group": "Interface", "keys": ["Tab"] },
+    { "id": "interact",     "label": "Interact",           "group": "Interface", "keys": ["KeyG"] },
+    { "id": "freeCamera",   "label": "Debug free camera",  "group": "Interface", "keys": ["F2"] }
+  ],
+  "reserved": ["Escape", "F3", "F4", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"],
+  "doubleTapDodgeSeconds": 0.25,
+  "mouseSensitivity": 1.0,
+  "invertY": false
+}

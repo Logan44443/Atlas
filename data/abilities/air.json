@@ -1,0 +1,12 @@
+{
+  "element": "air",
+  "_comment": "Air: speed and evasion; highest mobility, lowest damage.",
+  "abilities": [
+    { "slot": "basic",    "id": "air_slice",    "name": "Air Slice",    "kind": "projectile", "damage": 7,  "chiCost": 0,  "cooldown": 0.28, "range": 30, "speed": 55, "radius": 0.4, "vfx": "air_slice", "anim": "slice" },
+    { "slot": "heavy",    "id": "air_cannon",   "name": "Air Cannon",   "kind": "projectile", "damage": 18, "chiCost": 18, "cooldown": 3.5,  "range": 30, "speed": 45, "radius": 1.0, "knockback": 16, "vfx": "air_cannon", "anim": "heavy" },
+    { "slot": "mobility", "id": "air_scooter",  "name": "Air Scooter",  "kind": "dash",       "damage": 0,  "chiCost": 10, "cooldown": 3,    "distance": 16, "duration": 0.5, "vfx": "air_ball", "anim": "scooter" },
+    { "slot": "defense",  "id": "air_bubble",   "name": "Air Bubble",   "kind": "shield",     "damage": 0,  "chiCost": 16, "cooldown": 8,    "duration": 2, "reduction": 0.5, "blocksProjectiles": true, "reflects": true, "radius": 1.8, "vfx": "air_bubble", "anim": "spin" },
+    { "slot": "control",  "id": "vortex_pull",  "name": "Vortex Pull",  "kind": "ring",       "damage": 5,  "chiCost": 22, "cooldown": 11,   "radius": 8, "duration": 1.2, "tick": 0.4, "pull": 9, "vfx": "vortex", "anim": "spin" },
+    { "slot": "ultimate", "id": "tornado",      "name": "Tornado",      "kind": "ring",       "damage": 10, "chiCost": 60, "cooldown": 40,   "radius": 7, "duration": 5, "tick": 0.33, "pull": 4, "lift": 6, "vfx": "tornado", "anim": "spin" }
+  ]
+}

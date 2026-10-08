@@ -1,0 +1,28 @@
+{
+  "_comment": "Shared combat tuning. Element modifiers multiply outgoing damage (and healing for water).",
+  "health": 200,
+  "chi": { "max": 100, "regenOutOfCombat": 22, "regenInCombat": 7, "combatTimeout": 5 },
+  "block": { "damageTaken": 0.3, "perfectWindow": 0.22, "staggerSeconds": 1.2, "reflectSpeedScale": 1.2, "chiPerBlockedHit": 4 },
+  "dodgeInvulnerable": [0.05, 0.28],
+  "targetAssist": { "range": 40, "angleDegrees": 12 },
+  "elements": {
+    "fire":  { "dayBonus": 0.15, "noonBonus": 0.1, "nightPenalty": 0.1 },
+    "water": { "nightBonus": 0.15, "fullMoonBonus": 0.1, "nearWaterBonus": 0.1, "nearWaterMeters": 8 },
+    "earth": { "rockBonus": 0.1, "airborneDisabled": true },
+    "air":   {}
+  },
+  "matchups": {
+    "_comment": "attacker vs defender extra multiplier (~10% soft edges, not hard counters).",
+    "water": { "fire": 1.1 },
+    "air":   { "earth": 1.1 },
+    "earth": { "fire": 1.05 },
+    "fire":  { "air": 1.1 }
+  },
+  "statuses": { "burn": { "tick": 0.5 }, "slow": {}, "root": {}, "stagger": {} },
+  "dummies": [
+    { "id": "dummy_a", "name": "Training Dummy", "hp": 300, "offset": [6, -8], "attacks": false },
+    { "id": "dummy_b", "name": "Training Dummy", "hp": 300, "offset": [-6, -10], "attacks": false },
+    { "id": "dummy_c", "name": "Sparring Dummy", "hp": 400, "offset": [0, -18], "attacks": true, "attackEvery": 3.0, "attackDamage": 12, "attackSpeed": 18 }
+  ],
+  "dummyRespawnSeconds": 5
+}

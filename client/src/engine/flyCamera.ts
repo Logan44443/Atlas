@@ -11,7 +11,7 @@ export class FlyCamera {
 
   update(dt: number): void {
     const i = this.input;
-    if (i.buttons || i.pointerLocked) {
+    if (i.isDown('Mouse0') || i.isDown('Mouse2') || i.pointerLocked) {
       this.yaw -= i.mouseDX * 0.0025;
       this.pitch = THREE.MathUtils.clamp(this.pitch - i.mouseDY * 0.0025, -1.45, 1.45);
     }

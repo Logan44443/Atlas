@@ -7,7 +7,8 @@ This file covers architecture, layout, conventions and the current phase. Update
 
 - **Phase 1 Foundations**: done (terrain, sky, day/night, grass, quality presets, debug overlay).
 - **Phase 2 Chunk streaming**: done (world build script, manifest + hashes, load rings, prefetch, unload, workers, Service Worker cache, LRU, chunk map).
-- **Phase 3 Character**: in progress.
+- **Phase 3 Character**: done (Rapier kinematic controller: walk/sprint/jump/dodge/swim/block stance, procedural primitive avatar, over-the-shoulder camera with terrain collision, settings menu with rebinding + display name, nameplate, F2 free camera).
+- **Phase 4 Bending v1**: in progress.
 
 ## Run it
 
@@ -35,7 +36,8 @@ client/              Vite root (index.html, src/, public/)
   src/main.ts        bootstrap + main loop
   src/engine/        renderer (+bloom pipeline), quality presets/auto-detect, input, cameras, service worker registration
   src/world/         sky, day/night, materials (TSL), water, grass, props, chunk streamer/store/worker
-  src/ui/            debug overlay, chunk minimap, CSS
+  src/game/          physics (Rapier), player controller, avatar, third-person camera, nameplate
+  src/ui/            debug overlay, chunk minimap, settings menu, CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -48,6 +50,10 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   world.json         seed, chunk size (64 m), terrain shape, biome colours, grass, water
   time.json          day length, moon cycle, lighting keyframes by hour
   props.json         tree/rock/bush scatter rules
+  controls.json      default key bindings (players override in Settings, saved to localStorage `fw.settings`)
+  character.json     movement, dodge, swim and camera tuning
+  combat.json, abilities/*.json   bending numbers (Phase 4)
+  crafting/combos.json            element combo recipes (Phase 9)
 scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
 docs/DESIGN.md       game design (keep in sync)
 ```
@@ -69,6 +75,10 @@ docs/DESIGN.md       game design (keep in sync)
   (near/mid/far from `quality.json`) with hysteresis, prioritises chunks ahead of travel, prefetches data along
   the velocity, unloads beyond far+1.5, builds meshes in a worker pool and uploads a bounded number per frame.
   Near chunks fire `onNear`/`onLeaveNear` hooks (physics colliders hang off these).
+- **Character**: `Player` runs a fixed 60 Hz step on Rapier's `KinematicCharacterController` and interpolates for
+  rendering. Terrain colliders are Rapier heightfields for near chunks only (column-major, rows along Z). If a
+  chunk's collider isn't loaded yet the player is held on the analytic ground. Input goes through `Controls`
+  (action ids from `controls.json`) so rebinding never touches gameplay code.
 - **Determinism**: terrain is a pure function of `world.json`; workers and (later) the server use the same
   `TerrainSampler`, so heights match everywhere.
 
