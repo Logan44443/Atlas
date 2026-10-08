@@ -83,6 +83,8 @@ export interface BossMove {
 export interface BossDef {
   id: string;
   name: string;
+  /** a proper name ("Frostfang", "The Hollow Stag") that takes no "the" */
+  proper?: boolean;
   tier: 'legendary' | 'world' | 'mini';
   element: ElementId;
   shape: string;
@@ -106,6 +108,10 @@ export interface BossDef {
   phases: Array<{ below: number; every: number; moves: string[]; enrage?: number }>;
 }
 export const BOSSES = bossData.bosses as unknown as BossDef[];
+/** "the Sun Dragon", while proper names ("Frostfang", "The Hollow Stag") stand alone. */
+export function theName(b: { name: string; proper?: boolean }, capital = false): string {
+  return b.proper ? b.name : `${capital ? 'The' : 'the'} ${b.name}`;
+}
 export const MOVES = bossData.moves as unknown as Record<string, BossMove>;
 export const bossById = (id: string) => BOSSES.find((b) => b.id === id);
 
@@ -341,7 +347,7 @@ export class Wildlife {
     const z = player.pos.z + dir.z * 9;
     const hp = Math.round(c.trialHp + c.trialHpPerLevel * player.level);
     const e = createEntity({
-      id: `trial_${player.id}`, name: `Spirit of the ${def.name}`, kind: 'creature', team: 'wild', element: def.element, level: player.level, hp, maxHp: hp,
+      id: `trial_${player.id}`, name: `Spirit of ${theName(def)}`, kind: 'creature', team: 'wild', element: def.element, level: player.level, hp, maxHp: hp,
       pos: new Vector3(x, this.ground(x, z), z), radius: def.radius * 0.6, height: def.height * 0.6, beast: def.shape, scale: def.scale * 0.6,
       role: 'trial', title: 'Bond Trial', trialOf: player.id,
     });
@@ -449,14 +455,14 @@ export class Wildlife {
         }
         else if (w !== cur.window && cur.window !== -2 && this.sim.time - cur.entity.lastCombat > 15) {
           this.remove(id);
-          news.push({ t: 'announce', text: `The ${def.name} has gone back into hiding.` });
+          news.push({ t: 'announce', text: `${theName(def, true)} has gone back into hiding.` });
         }
         continue;
       }
       if (w >= 0 && this.bossKilled.get(def.id) !== w) {
         this.spawnBoss(def, w);
         const dir = compassText(def.x, def.z);
-        news.push({ t: 'announce', text: `${def.tier === 'legendary' ? 'Legendary' : 'World'} boss: the ${def.name} has risen ${dir}!` });
+        news.push({ t: 'announce', text: `${def.tier === 'legendary' ? 'Legendary' : 'World'} boss: ${theName(def)} has risen ${dir}!` });
       }
     }
   }
@@ -756,7 +762,7 @@ export class Wildlife {
             add.target = target.id;
             add.home.copy(b.home);
           }
-          news.push({ t: 'notice', id: target.id, text: `The ${def.name} calls for help!`, warn: true });
+          news.push({ t: 'notice', id: target.id, text: `${theName(def, true)} calls for help!`, warn: true });
           break;
         }
       }
@@ -788,7 +794,7 @@ export class Wildlife {
     if (!def) return out;
     if (def.tier !== 'mini') {
       this.bossKilled.set(def.id, b.window);
-      out.push({ t: 'announce', text: `The ${def.name} has been defeated!` });
+      out.push({ t: 'announce', text: `${theName(def, true)} has been defeated!` });
     }
     const dmg = e.damagers ?? new Map<string, number>();
     // Everyone who dealt at least contributionMin of the damage it took shares the rewards.
@@ -800,8 +806,8 @@ export class Wildlife {
       if (!p || amount < min) continue;
       if (Math.hypot(p.entity.pos.x - e.pos.x, p.entity.pos.z - e.pos.z) > BOSS_CFG.rewardRadius) continue;
       const xp = Math.round(def.xp * levelFactor(p.progress.level, def.level));
-      if (xp > 0) out.push({ t: 'xp', id, amount: xp, reason: `defeated the ${def.name}` });
-      else out.push({ t: 'xp', id, amount: 0, reason: `no XP: the ${def.name} is far below your level` });
+      if (xp > 0) out.push({ t: 'xp', id, amount: xp, reason: `defeated ${theName(def)}` });
+      else out.push({ t: 'xp', id, amount: 0, reason: `no XP: ${theName(def)} is far below your level` });
       out.push({ t: 'loot', id, items: { ...def.loot } });
       if (def.tier === 'mini' && def.pet) out.push({ t: 'rare', id, boss: def.id, pet: def.pet });
       if (def.tier === 'legendary' && def.pet && p.entity.element === def.element) {
@@ -813,7 +819,7 @@ export class Wildlife {
           out.push({ t: 'bond', id, boss: def.id, pet: def.pet });
         } else {
           p.progress.pets.pity[def.id] = pity + 1;
-          out.push({ t: 'notice', id, text: `The ${def.name} did not answer your call (bond chance now ${Math.round(bondChance(pity + 1) * 100)}%)` });
+          out.push({ t: 'notice', id, text: `${theName(def, true)} did not answer your call (bond chance now ${Math.round(bondChance(pity + 1) * 100)}%)` });
         }
       }
     }

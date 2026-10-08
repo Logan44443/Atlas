@@ -205,7 +205,7 @@ export type SimEvent =
   | { t: 'dash'; owner: string; element: ElementId; dir: [number, number, number]; distance: number; duration: number; lift: number }
   | { t: 'impulse'; target: string; v: [number, number, number] }
   | { t: 'death'; target: string; source: string | null }
-  | { t: 'respawn'; target: string }
+  | { t: 'respawn'; target: string; pos: [number, number, number] }
   | { t: 'castFail'; caster: string; slot: Slot; reason: string }
   // Phase 9: bending that reaches a structure (the host applies raid rules and turns it into 'struct').
   | { t: 'structHit'; id: string; source: string; amount: number; element: ElementId; pos: [number, number, number] }
@@ -808,7 +808,7 @@ export class CombatSim {
     target.hp = target.maxHp;
     target.chi = target.maxChi;
     target.statuses.clear();
-    this.events.push({ t: 'respawn', target: target.id });
+    this.events.push({ t: 'respawn', target: target.id, pos: arr(target.pos) });
   }
 
   applyStatus(targetId: string, source: SimEntity | null, s: StatusDef): void {

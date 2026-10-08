@@ -296,7 +296,10 @@ export class LocalCombat implements CombatHost {
   /** Tests: raise a boss now (near the player when `here`), force Bond Trial rolls. */
   devBoss(id: string, here = false, hp?: number): void {
     const e = this.wild.forceBoss(id, here ? { x: this.me.pos.x + 14, z: this.me.pos.z } : undefined);
-    if (e && hp && hp > 0) e.hp = Math.min(e.maxHp, Math.round(hp));
+    if (e && hp && hp > 0) {
+      e.hp = Math.min(e.maxHp, Math.round(hp));
+      e.lastCombat = this.sim.time; // or it heals straight back up at home
+    }
   }
   devPet(kind: string): void {
     const def = petDef(kind);

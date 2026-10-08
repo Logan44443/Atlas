@@ -6,7 +6,7 @@ import { artsFor, questStatus } from './arts';
 import { BAG_CAP, invTotal, raidOpen, raidText } from './building';
 import { PVP, factionById } from './factions';
 import { pointsEarned, pointsSpent, LANDMARKS, type Progress } from './progression';
-import { BOSSES, SPECIES, bossWindow, bossNextMinutes, densNear, directions, speciesById } from './sim/wildlife';
+import { BOSSES, SPECIES, theName, bossWindow, bossNextMinutes, densNear, directions, speciesById } from './sim/wildlife';
 import { PET_DEFS, PET_RULES, fedNow } from './pets';
 import type { SimEntity } from './sim/combatSim';
 import type { ElementId } from './combat';
@@ -62,12 +62,12 @@ function bossNews(me: SimEntity, now: number, night: number): string | null {
   const up = BOSSES.filter((b) => b.tier !== 'mini' && bossWindow(b, now, night) >= 0);
   if (up.length) {
     const b = up[0];
-    return `The ${b.name} is awake right now, ${directions(me.pos.x, me.pos.z, b.x, b.z)}. Bring friends: it grows stronger with every challenger.`;
+    return `${theName(b, true)} is awake right now, ${directions(me.pos.x, me.pos.z, b.x, b.z)}. Bring friends: it grows stronger with every challenger.`;
   }
   const next = BOSSES.filter((b) => b.tier !== 'mini').map((b) => ({ b, m: bossNextMinutes(b, now) })).sort((a, c) => a.m - c.m)[0];
   if (!next) return null;
   const when = next.m >= 60 ? `${Math.round(next.m / 60)} h` : `${next.m} min`;
-  return `Word is the ${next.b.name} stirs in about ${when}, ${directions(me.pos.x, me.pos.z, next.b.x, next.b.z)}.`;
+  return `Word is ${theName(next.b)} stirs in about ${when}, ${directions(me.pos.x, me.pos.z, next.b.x, next.b.z)}.`;
 }
 
 /** One useful line for this NPC role and this player. */

@@ -174,7 +174,10 @@ export class WorldRoom extends Room<WorldState> {
         const p = this.players.get(c.sessionId);
         if (!p || !m?.id) return;
         const e = this.wild.forceBoss(String(m.id), m.here ? { x: p.entity.pos.x + 14, z: p.entity.pos.z } : undefined);
-        if (e && Number.isFinite(m.hp) && m.hp! > 0) e.hp = Math.min(e.maxHp, Math.round(m.hp!));
+        if (e && Number.isFinite(m.hp) && m.hp! > 0) {
+          e.hp = Math.min(e.maxHp, Math.round(m.hp!));
+          e.lastCombat = this.sim.time; // or it heals straight back up at home
+        }
       });
       // Tests: put a pet straight into your stable.
       this.onMessage('dev:pet', (c, kind: string) => {

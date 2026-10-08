@@ -433,7 +433,8 @@ async function main() {
         break;
       case 'respawn':
         if (e.target === me.id) {
-          if (host.online) player.teleport(me.pos.x, me.pos.z);
+          // (The event carries the spot: the state patch with it can arrive later.)
+          if (host.online) player.teleport(e.pos[0], e.pos[2]);
           else {
             const h = campRespawn(host.camps, host.charId) ?? hubSpawn(character.faction);
             player.teleport(h.x, h.z);

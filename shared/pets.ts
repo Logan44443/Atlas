@@ -8,7 +8,7 @@ import commonData from '../data/pets/common.json';
 import rareData from '../data/pets/rare.json';
 import legendaryData from '../data/pets/legendary.json';
 import { CombatSim, createEntity, center, canHarm, handOf, type SimEntity } from './sim/combatSim';
-import { attackAbility, speciesById, bossById, type CreatureAttack, type Wildlife, type BossDef } from './sim/wildlife';
+import { attackAbility, speciesById, bossById, theName, type CreatureAttack, type Wildlife, type BossDef } from './sim/wildlife';
 import { levelPower, type ElementId } from './combat';
 import { takeItems, type Inventory } from './building';
 import type { Progress } from './progression';
@@ -435,7 +435,7 @@ export class PetRules {
     if (this.trials.has(o.entity.id)) return null;
     const e = this.wild.spawnTrial(boss, o.entity, boss.pet);
     this.trials.set(o.entity.id, e.id);
-    return `Bond Trial: defeat the Spirit of the ${boss.name} alone to bond with it!`;
+    return `Bond Trial: defeat the Spirit of ${theName(boss)} alone to bond with it!`;
   }
 
   endTrial(o: PetOwner, petId: string, won: boolean, now: number): string {
@@ -458,7 +458,7 @@ export class PetRules {
     const guard = (p: PetDef) => bossById(p.from);
     if (active) {
       const g = guard(active)!;
-      return `The ${g.name} guards a young ${active.name}. Beat it (friends welcome), then earn the young one's trust. ${dirText(o.entity, g.x, g.z)}`;
+      return `${theName(g, true)} guards a young ${active.name}. Beat it (friends welcome), then earn the young one's trust. ${dirText(o.entity, g.x, g.z)}`;
     }
     const next = rares.find((p) => !st.owned.some((x) => x.kind === p.id));
     if (!next) return "You've raised every rare beast I know of. Only the legends remain: the four great spirits rise as world bosses.";
