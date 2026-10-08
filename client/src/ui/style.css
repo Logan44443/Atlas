@@ -76,3 +76,38 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f1c; col
 .settings .secondary { background: transparent; color: var(--muted); border: 1px solid #2c344a; border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; }
 .settings .toast { position: sticky; bottom: 0; margin-top: 10px; background: #3a2a1a; color: #ffd8a8; padding: 8px 10px; border-radius: 6px; font-size: 13px; }
 @media (max-width: 520px) { .settings .bind-row { grid-template-columns: 1fr 90px 90px; } }
+
+/* Combat HUD */
+.hud { position: fixed; inset: 0; pointer-events: none; z-index: 12; }
+.hud-bottom { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.hud-bars { display: flex; align-items: center; gap: 8px; }
+.hud-bars .bars { display: flex; flex-direction: column; gap: 4px; }
+.element-badge { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; background: var(--panel); border: 2px solid #fff3; }
+.element-badge.el-fire { border-color: #ff7a3a; } .element-badge.el-water { border-color: #4fb6f0; }
+.element-badge.el-earth { border-color: #8bbf4a; } .element-badge.el-air { border-color: #f0d27a; }
+.bar { position: relative; width: 300px; height: 10px; border-radius: 5px; background: rgba(0,0,0,0.55); overflow: hidden; }
+.bar.big { height: 16px; }
+.bar .fill { height: 100%; transition: width 0.12s; }
+.fill.hp { background: linear-gradient(#f0624a, #b8321f); }
+.fill.chi { background: linear-gradient(#6fd0ff, #2f86c8); }
+.bar .txt { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10px; font-weight: 600; text-shadow: 0 1px 2px #000; }
+.hud-slots { display: flex; gap: 6px; }
+.slot { position: relative; width: 62px; height: 62px; border-radius: 8px; background: var(--panel); border: 1px solid #ffffff2a; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 4px; }
+.slot-ultimate { border-color: #ffb45a99; }
+.slot .key { position: absolute; top: 3px; left: 5px; font: 600 11px ui-monospace, monospace; color: var(--accent); }
+.slot .name { font-size: 9.5px; line-height: 1.1; text-align: center; color: var(--ink); }
+.slot .cd { position: absolute; inset: 0; }
+.slot .cd-t { position: absolute; inset: 0; display: grid; place-items: center; font-size: 18px; font-weight: 700; text-shadow: 0 1px 3px #000; }
+.slot.nochi { filter: grayscale(0.8) brightness(0.7); }
+.hud-target { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; text-shadow: 0 1px 2px #000; }
+.hud-target .bar { width: 220px; }
+.hud-target.hidden { display: none; }
+.hud-status { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%); font-size: 13px; color: var(--muted); text-shadow: 0 1px 2px #000; }
+.hud-status.warn { color: #ffb0a0; }
+.floater { position: fixed; left: 0; top: 0; z-index: 13; pointer-events: none; font-weight: 800; font-size: 18px; text-shadow: 0 2px 3px #000, 0 0 2px #000; white-space: nowrap; }
+.floater.dmg-out { color: #fff2c0; }
+.floater.dmg-dot { color: #ffb070; font-size: 14px; }
+.floater.dmg-in { color: #ff6b5a; }
+.floater.info { color: #cfe3ff; font-size: 14px; }
+.floater.counter { color: #ffe066; font-size: 24px; }
+@media (max-width: 700px) { .bar { width: 200px; } .slot { width: 48px; height: 48px; } .slot .name { display: none; } }

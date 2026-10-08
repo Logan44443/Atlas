@@ -1,4 +1,4 @@
-import { ACTIONS, RESERVED, keyLabel, validateName, defaultBindings, type Settings } from '../engine/settings';
+import { ACTIONS, RESERVED, keyLabel, validateName, defaultBindings, type Settings, type PlayerSettings } from '../engine/settings';
 import type { Input } from '../engine/input';
 import type { QualitySetting } from '../engine/quality';
 
@@ -67,6 +67,11 @@ export class SettingsMenu {
         <label class="field"><span>Display name</span>
           <input id="set-name" maxlength="16" value="${escapeHtml(d.name)}" autocomplete="off" spellcheck="false" />
           <small id="set-name-err" class="err"></small>
+        </label>
+        <label class="field"><span>Element <small>(testing only: becomes permanent at character creation)</small></span>
+          <select id="set-element">
+            ${['fire', 'water', 'earth', 'air'].map((e) => `<option value="${e}" ${d.element === e ? 'selected' : ''}>${e[0].toUpperCase() + e.slice(1)}</option>`).join('')}
+          </select>
         </label>
         <label class="field"><span>Mouse sensitivity <b id="sens-val">${d.mouseSensitivity.toFixed(2)}</b></span>
           <input id="set-sens" type="range" min="0.2" max="3" step="0.05" value="${d.mouseSensitivity}" />
@@ -141,6 +146,11 @@ export class SettingsMenu {
     const inv = $<HTMLInputElement>('#set-inv');
     inv?.addEventListener('change', () => {
       this.settings.data.invertY = inv.checked;
+      this.settings.save();
+    });
+    const el = $<HTMLSelectElement>('#set-element');
+    el?.addEventListener('change', () => {
+      this.settings.data.element = el.value as PlayerSettings['element'];
       this.settings.save();
     });
     const q = $<HTMLSelectElement>('#set-quality');

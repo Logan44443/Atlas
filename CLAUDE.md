@@ -8,7 +8,11 @@ This file covers architecture, layout, conventions and the current phase. Update
 - **Phase 1 Foundations**: done (terrain, sky, day/night, grass, quality presets, debug overlay).
 - **Phase 2 Chunk streaming**: done (world build script, manifest + hashes, load rings, prefetch, unload, workers, Service Worker cache, LRU, chunk map).
 - **Phase 3 Character**: done (Rapier kinematic controller: walk/sprint/jump/dodge/swim/block stance, procedural primitive avatar, over-the-shoulder camera with terrain collision, settings menu with rebinding + display name, nameplate, F2 free camera).
-- **Phase 4 Bending v1**: in progress.
+- **Phase 4 Bending v1**: done for all four elements (6 abilities each from `data/abilities/*.json`, chi, block +
+  perfect-block counter, dodge i-frames, statuses burn/slow/root/stagger, shields, element/time-of-day modifiers,
+  soft matchups, target assist, particle VFX with bloom, HUD, training + sparring dummies). Runs client-side;
+  `CombatSystem` never reads input so it can move to the server in Phase 5.
+- **Phase 5 Multiplayer**: next.
 
 ## Run it
 
@@ -19,6 +23,8 @@ npm run build        # typecheck + production build into dist/
 npm run world -- --force   # regenerate client/public/world/ (gitignored, ~65 MB, ~15 s)
 npm run smoke        # headless Chromium smoke test against a running dev server (screenshots/)
 SCENARIO=stream npm run smoke   # fly across the world, then reload and check SW cache hits
+SCENARIO=character npm run smoke   # movement + settings menu (rename, rebind)
+SCENARIO=combat npm run smoke      # all 4 elements vs dummies + block/perfect-block counter
 ```
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker).
@@ -37,7 +43,8 @@ client/              Vite root (index.html, src/, public/)
   src/engine/        renderer (+bloom pipeline), quality presets/auto-detect, input, cameras, service worker registration
   src/world/         sky, day/night, materials (TSL), water, grass, props, chunk streamer/store/worker
   src/game/          physics (Rapier), player controller, avatar, third-person camera, nameplate
-  src/ui/            debug overlay, chunk minimap, settings menu, CSS
+  src/game/combat/   CombatSystem (projectiles/areas/hits/statuses), combatants (player, dummies), abilities (input -> casts), VFX particles
+  src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -45,6 +52,7 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   terrain.ts         TerrainSampler: height(x,z), biome colours, grassiness
   chunkMesh.ts       chunk mesh builder (LOD + skirts), height-grid lookup
   world.ts           chunk keys, file formats, manifest types
+  combat.ts          ability/element types, element power (day/night/moon/water/rock), matchups, level scaling
 data/                ALL tunable numbers (JSON). Edit these, not code.
   quality.json       Low/Medium/High presets (pixel ratio, shadows, grass, rings, LOD)
   world.json         seed, chunk size (64 m), terrain shape, biome colours, grass, water
@@ -89,5 +97,6 @@ docs/DESIGN.md       game design (keep in sync)
 - Prefer instancing / merged geometry; check draw calls in the F3 overlay. Budget: 60 FPS High on M4 Air, 30 FPS Low.
 - Placeholder art = primitives with vertex colours until mechanics are fun.
 - Verify each change in a headless browser (`npm run smoke`). Headless Chromium here has no GPU, so it runs
-  the WebGL2 backend on SwiftShader at ~10 FPS: judge correctness there, not performance.
+  the WebGL2 backend on SwiftShader at 1-3 real FPS (sim dt is clamped to 0.1 s, so wait on `combat.time`, not wall
+  time): judge correctness there, not performance.
 - Ask the owner before paid services, real accounts/payments or big irreversible choices.

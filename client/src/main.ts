@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import worldData from '@data/world.json';
+import combatData from '@data/combat.json';
 import { TerrainSampler, type TerrainConfig } from '@shared/terrain';
 import { GameRenderer } from './engine/renderer';
 import { Input } from './engine/input';
@@ -19,13 +20,20 @@ import { Player } from './game/player';
 import { Avatar } from './game/avatar';
 import { Nameplate } from './game/nameplate';
 import { ThirdPersonCamera } from './game/thirdPersonCamera';
+import { Vfx } from './game/combat/vfx';
+import { CombatSystem } from './game/combat/combatSystem';
+import { PlayerCombatant, Dummy } from './game/combat/actors';
+import { PlayerAbilities } from './game/combat/abilities';
+import { CFG } from './game/combat/combatant';
+import { Hud } from './ui/hud';
 import { DebugOverlay } from './ui/debug';
 import { ChunkMinimap } from './ui/minimap';
 import { SettingsMenu } from './ui/settingsMenu';
 
 const HELP = `Click to capture mouse, Esc for settings
 WASD move, Shift sprint, Space jump, V dodge
-Hold right mouse: block. Wheel: zoom
+LMB basic, Q E R F X abilities, Tab target
+Hold right mouse: block (time it to counter)
 F2 free camera  F3 overlay  F4/M chunk map`;
 
 function setLoading(text: string, frac: number) {
@@ -95,11 +103,67 @@ async function main() {
   // Player.
   spawn.y = Math.max(groundAt(spawn.x, spawn.z), worldData.seaLevel);
   const player = new Player(physics, controls, spawn, groundAt, worldData.chunkSize);
-  const avatar = new Avatar('fire');
+  let avatar = new Avatar(settings.data.element);
   const nameplate = new Nameplate(settings.data.name);
   avatar.root.add(nameplate.sprite);
   scene.add(avatar.root);
-  settings.onChange((s) => nameplate.set(s.name));
+
+  // Combat (Phase 4). Runs locally for now; moves server-side in Phase 5.
+  const vfx = new Vfx();
+  scene.add(vfx.group);
+  const combat = new CombatSystem(vfx, groundAt);
+  scene.add(combat.group);
+  const me = new PlayerCombatant(player, settings.data.name, settings.data.element);
+  combat.add(me);
+  const dummies: Dummy[] = [];
+  for (const d of combatData.dummies) {
+    const home = new THREE.Vector3(spawn.x + d.offset[0], 0, spawn.z + d.offset[1]);
+    home.y = groundAt(home.x, home.z);
+    const dummy = new Dummy(d, home, groundAt);
+    dummies.push(dummy);
+    combat.add(dummy);
+    scene.add(dummy.root);
+  }
+  const elementContext = () => {
+    const f = player.renderPos;
+    let nearWater = player.swimming;
+    const r = CFG.elements.water.nearWaterMeters;
+    for (let k = 0; k < 8 && !nearWater; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      if (groundAt(f.x + Math.cos(a) * r, f.z + Math.sin(a) * r) < worldData.seaLevel) nearWater = true;
+    }
+    const ny = sampler.slopeY(f.x, f.z);
+    const onRock = ny < worldData.biomes.rockSlope + 0.05 || f.y > worldData.biomes.grassMaxHeight;
+    return { night: dayNight.nightFactor, sunHeight: dayNight.sunDir.y, moonPhase: dayNight.moonPhase, nearWater, onRock, grounded: player.grounded };
+  };
+  const abilities = new PlayerAbilities(me, combat, controls, camera, vfx, elementContext);
+  const hud = new Hud(settings);
+  combat.on((e) => {
+    hud.onEvent(e, me.id);
+    if (e.kind === 'death' && e.target === me) {
+      // Phase 4 has no death penalty yet: get back up at spawn.
+      setTimeout(() => {
+        me.dead = false;
+        me.hp = me.maxHp;
+        me.chi = me.maxChi;
+        me.statuses.clear();
+        player.teleport(spawn.x, spawn.z);
+      }, 2000);
+    }
+  });
+
+  settings.onChange((s) => {
+    nameplate.set(s.name);
+    me.name = s.name;
+    if (s.element !== abilities.element) {
+      abilities.setElement(s.element);
+      scene.remove(avatar.root);
+      avatar.root.remove(nameplate.sprite);
+      avatar = new Avatar(s.element);
+      avatar.root.add(nameplate.sprite);
+      scene.add(avatar.root);
+    }
+  });
 
   const tpc = new ThirdPersonCamera(camera, input, settings, physics, groundAt);
   const fly = new FlyCamera(camera, input, groundAt);
@@ -139,7 +203,9 @@ async function main() {
   // Exposed for automated browser tests and console tinkering.
   Object.assign(window, {
     __fw: {
-      scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, avatar, settings, menu, input, tpc, swActive,
+      scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
+      combat, me, dummies, abilities, vfx, elementContext,
+      get avatar() { return avatar; },
       get preset() { return presetName; },
       get freeCam() { return freeCam; },
     },
@@ -155,7 +221,8 @@ async function main() {
 
   gr.renderer.setAnimationLoop(() => {
     clock.update();
-    const dt = Math.min(clock.getDelta(), 0.1);
+    const rawDt = clock.getDelta();
+    const dt = Math.min(rawDt, 0.1);
 
     if (controls.pressed('freeCamera')) {
       freeCam = !freeCam;
@@ -167,11 +234,23 @@ async function main() {
     }
 
     if (!loading) {
+      me.sync();
       if (freeCam) fly.update(dt);
-      else player.update(dt, tpc.yaw);
+      else if (!me.dead) player.update(dt, tpc.yaw);
+      // Block stance: remember when it started so perfect-timed blocks can counter.
+      const wasBlocking = me.blocking;
+      me.blocking = player.blocking && !me.dead;
+      if (me.blocking && !wasBlocking) me.blockStart = combat.time;
+      if (!freeCam) abilities.update(dt, me.blocking);
+      combat.update(dt);
+      for (const d of dummies) d.update(dt, combat, me);
+      vfx.update(dt);
       avatar.root.position.copy(player.renderPos);
       avatar.root.rotation.y = player.facing;
-      avatar.update(dt, player.pose());
+      const fb = abilities.feedback;
+      avatar.update(dt, { ...player.pose(), cast: fb.gesture, castStyle: fb.style });
+      avatar.root.rotation.z = me.dead ? Math.PI / 2 : 0;
+      hud.update(dt, camera, me, abilities, abilities.target);
       if (!freeCam) tpc.update(dt, player);
     } else {
       tpc.update(0, player);
@@ -202,7 +281,7 @@ async function main() {
       }
     }
 
-    fpsAcc += dt;
+    fpsAcc += rawDt;
     fpsFrames++;
     if (fpsAcc >= 0.5) {
       const fps = fpsFrames / fpsAcc;
@@ -244,6 +323,7 @@ async function main() {
           moon: phase > 0.95 ? 'Full' : phase < 0.05 ? 'New' : `${Math.round(phase * 100)}%`,
           pos: `${pp.x.toFixed(0)}, ${pp.y.toFixed(1)}, ${pp.z.toFixed(0)}`,
           extra: [
+            ['Combat', `${abilities.element} x${abilities.power.toFixed(2)} vfx ${vfx.count} proj ${combat.stats.projectiles}`],
             ['Player', `${player.grounded ? 'grounded' : player.swimming ? 'swimming' : 'air'} ${Math.hypot(player.velocity.x, player.velocity.z).toFixed(1)} m/s${freeCam ? ' (free cam)' : ''}`],
             ['Chunks', `${streamer.counts.near}/${streamer.counts.mid}/${streamer.counts.far} <span class="k">n/m/f</span> phys ${physics.terrainColliderCount}`],
             ['Queue', `${streamer.counts.queued} build ${streamer.counts.building} pre ${streamer.counts.prefetch}`],

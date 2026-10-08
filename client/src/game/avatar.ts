@@ -17,6 +17,9 @@ export interface AvatarPose {
   dodge: number; // 0..1 progress, 0 = not dodging
   swimming: boolean;
   blocking?: boolean;
+  /** 0..1 progress of a cast gesture, 0 = none */
+  cast?: number;
+  castStyle?: 'push' | 'stomp' | 'spin' | 'breath';
 }
 
 function mat(hex: string): THREE.MeshToonNodeMaterial {
@@ -165,6 +168,23 @@ export class Avatar {
       armSwing *= 0.2;
     }
 
+    if (p.cast && p.cast > 0) {
+      const k = Math.sin(Math.min(1, p.cast) * Math.PI);
+      if (p.castStyle === 'stomp') {
+        armBaseL = armBaseR = -0.4 * k;
+        armSpreadL = 1.2 * k;
+        armSpreadR = -1.2 * k;
+      } else if (p.castStyle === 'spin') {
+        armSpreadL = 1.5 * k;
+        armSpreadR = -1.5 * k;
+        this.torso.rotation.y = p.cast * Math.PI * 2;
+      } else {
+        // Push / punch / breath: right arm thrusts forward, left braces.
+        armBaseR = -1.55 * k;
+        armBaseL = -0.9 * k;
+        armSwing *= 0.2;
+      }
+    }
     set(this.legL.pivot, s * legSwing);
     set(this.legR.pivot, -s * legSwing);
     set(this.legL.lower, kneeL);
@@ -174,7 +194,7 @@ export class Avatar {
     set(this.armL.lower, -0.25 - run * 0.6);
     set(this.armR.lower, -0.25 - run * 0.6);
     this.torso.rotation.x += (lean - this.torso.rotation.x) * damp;
-    this.torso.rotation.y = moving && p.grounded ? s * 0.08 * (0.5 + run) : this.torso.rotation.y * (1 - damp);
+    if (!(p.cast && p.castStyle === 'spin')) this.torso.rotation.y = moving && p.grounded ? s * 0.08 * (0.5 + run) : this.torso.rotation.y * (1 - damp);
 
     // Dodge: full forward roll around the body centre, crouched.
     if (p.dodge > 0) {

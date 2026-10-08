@@ -1,6 +1,7 @@
 import controlsData from '@data/controls.json';
 import characterData from '@data/character.json';
 import type { Input } from './input';
+import type { ElementId } from '@shared/combat';
 
 export type ActionId = (typeof controlsData.actions)[number]['id'];
 
@@ -19,6 +20,8 @@ export interface PlayerSettings {
   bindings: Record<string, string[]>;
   mouseSensitivity: number;
   invertY: boolean;
+  /** Temporary until character creation (Phase 6) makes the element permanent per character. */
+  element: ElementId;
 }
 
 const KEY = 'fw.settings';
@@ -26,7 +29,7 @@ const KEY = 'fw.settings';
 function defaults(): PlayerSettings {
   const bindings: Record<string, string[]> = {};
   for (const a of ACTIONS) bindings[a.id] = [...a.keys];
-  return { name: '', bindings, mouseSensitivity: controlsData.mouseSensitivity, invertY: controlsData.invertY };
+  return { name: '', bindings, mouseSensitivity: controlsData.mouseSensitivity, invertY: controlsData.invertY, element: 'fire' };
 }
 
 export function defaultBindings(): Record<string, string[]> {
@@ -66,6 +69,7 @@ export class Settings {
         d.name = typeof saved.name === 'string' ? saved.name : '';
         d.mouseSensitivity = saved.mouseSensitivity ?? d.mouseSensitivity;
         d.invertY = saved.invertY ?? d.invertY;
+        if (saved.element && ['fire', 'water', 'earth', 'air'].includes(saved.element)) d.element = saved.element;
         for (const a of ACTIONS) if (Array.isArray(saved.bindings?.[a.id])) d.bindings[a.id] = saved.bindings![a.id].slice(0, 2);
       }
     } catch {

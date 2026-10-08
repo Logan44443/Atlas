@@ -31,6 +31,14 @@ export class Player {
   private dodgeCd = 0;
   private dodgeDir = new THREE.Vector3();
   blocking = false;
+  /** Set by combat statuses. */
+  moveScale = 1;
+  rooted = false;
+  staggered = false;
+  private dashT = 0;
+  private dashVel = new THREE.Vector3();
+  private faceYaw: number | null = null;
+  private faceT = 0;
   /** Feet position for rendering (interpolated). */
   readonly renderPos = new THREE.Vector3();
   private readonly centerOffset = C.capsule.halfHeight + C.capsule.radius;
@@ -56,6 +64,32 @@ export class Player {
     this.curr.set(spawn.x, y, spawn.z);
     this.prev.copy(this.curr);
     this.renderPos.set(spawn.x, spawn.y, spawn.z);
+  }
+
+  /** Ability movement: dash `distance` along `dir` over `duration`, optionally launching upward. */
+  dash(dir: THREE.Vector3, distance: number, duration: number, lift = 0): void {
+    this.dashT = duration;
+    this.dashVel.copy(dir).setY(0).normalize().multiplyScalar(distance / duration);
+    if (lift > 0) {
+      this.velocity.y = lift;
+      this.grounded = false;
+    }
+  }
+  get isDashing(): boolean {
+    return this.dashT > 0;
+  }
+
+  knockback(impulse: THREE.Vector3): void {
+    this.velocity.x += impulse.x;
+    this.velocity.z += impulse.z;
+    this.velocity.y = Math.max(this.velocity.y, impulse.y);
+    if (impulse.y > 0) this.grounded = false;
+  }
+
+  /** Turn to face `yaw` for a moment (casting toward the aim point). */
+  faceFor(yaw: number, seconds: number): void {
+    this.faceYaw = yaw;
+    this.faceT = seconds;
   }
 
   get dodgeProgress(): number {
@@ -85,7 +119,7 @@ export class Player {
       this.controls.pressed('dodge') ||
       (['moveForward', 'moveBack', 'moveLeft', 'moveRight'] as const).some((a) => this.controls.doubleTapped(a, controlsData.doubleTapDodgeSeconds));
     if (dodgePressed) this.tryDodge(cameraYaw);
-    this.blocking = this.controls.down('block') && this.grounded && !this.isDodging;
+    this.blocking = this.controls.down('block') && (this.grounded || this.coyote > 0) && !this.isDodging && !this.swimming;
 
     this.acc += Math.min(frameDt, 0.25);
     while (this.acc >= FIXED_DT) {
@@ -109,7 +143,7 @@ export class Player {
   }
 
   private tryDodge(cameraYaw: number): void {
-    if (this.dodgeCd > 0 || this.isDodging || this.swimming) return;
+    if (this.dodgeCd > 0 || this.isDodging || this.swimming || this.rooted || this.staggered) return;
     const dir = this.moveInput(cameraYaw);
     if (dir.lengthSq() === 0) dir.set(Math.sin(this.facing), 0, Math.cos(this.facing)).negate(); // backstep
     this.dodgeDir.copy(dir);
@@ -128,6 +162,8 @@ export class Player {
     const sprint = this.controls.down('sprint');
     let speed = this.swimming ? C.swim.speed : sprint ? C.runSpeed : C.walkSpeed;
     if (this.blocking) speed *= 0.35;
+    speed *= this.moveScale;
+    if (this.rooted || this.staggered) speed = 0;
     const target = input.clone().multiplyScalar(speed);
     const accel = C.acceleration * (this.grounded || this.swimming ? 1 : C.airControl);
     const hv = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
@@ -144,6 +180,11 @@ export class Player {
       const v = (C.dodge.distance / C.dodge.duration) * (0.6 + k * 0.8);
       hv.copy(this.dodgeDir).multiplyScalar(v);
     }
+    if (this.dashT > 0) {
+      this.dashT -= dt;
+      hv.copy(this.dashVel);
+      if (this.dashT <= 0) hv.multiplyScalar(0.35);
+    }
     this.velocity.x = hv.x;
     this.velocity.z = hv.z;
 
@@ -159,7 +200,7 @@ export class Player {
         this.jumpBuffer = 0;
       }
     } else {
-      if (this.jumpBuffer > 0 && this.coyote > 0 && !this.isDodging) {
+      if (this.jumpBuffer > 0 && this.coyote > 0 && !this.isDodging && !this.rooted && !this.staggered) {
         this.velocity.y = C.jumpVelocity;
         this.jumpBuffer = 0;
         this.coyote = 0;
@@ -187,7 +228,15 @@ export class Player {
     this.curr.set(next.x, next.y, next.z);
 
     // Face the movement direction (or the camera while blocking).
-    const faceTarget = this.blocking ? cameraYaw + Math.PI : hv.lengthSq() > 0.25 ? Math.atan2(hv.x, hv.z) : this.facing;
+    this.faceT = Math.max(0, this.faceT - dt);
+    const faceTarget =
+      this.faceT > 0 && this.faceYaw !== null
+        ? this.faceYaw
+        : this.blocking
+          ? cameraYaw + Math.PI
+          : hv.lengthSq() > 0.25
+            ? Math.atan2(hv.x, hv.z)
+            : this.facing;
     let d = faceTarget - this.facing;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     this.facing += d * Math.min(1, C.turnSpeed * dt);
