@@ -3,7 +3,7 @@
   "contributionMin": 0.02,
   "rewardRadius": 140,
   "leash": 70,
-  "bond": { "baseChance": 0.05, "pityStep": 0.05, "maxChance": 0.6, "trialSeconds": 150, "trialHp": 1400, "trialHpPerLevel": 40, "trialPower": 0.6 },
+  "bond": { "baseChance": 0.05, "pityStep": 0.05, "maxChance": 0.6, "trialWaitSeconds": 60, "trialSeconds": 150, "trialHp": 1400, "trialHpPerLevel": 40, "trialPower": 0.6 },
   "bosses": [
     {
       "id": "sun_dragon", "name": "Sun Dragon", "tier": "legendary", "element": "fire", "shape": "dragon", "color": "#c8381f", "accent": "#ffcf5a",

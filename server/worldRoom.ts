@@ -770,6 +770,7 @@ export class WorldRoom extends Room<WorldState> {
     this.applyWild(this.wild.update(dt, owners));
     for (const p of owners) this.pets.sync(p, now);
     this.pets.update(dt, this.players, now);
+    for (const a of this.pets.announcements.splice(0)) this.clientOf(a.id)?.send('announce', a.text);
     const events = this.sim.drain();
 
     for (const p of this.players.values()) {

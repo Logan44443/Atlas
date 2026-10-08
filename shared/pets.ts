@@ -4,6 +4,7 @@
 // shard server and offline play share them.
 import { Vector3 } from 'three';
 import rules from '../data/pets/rules.json';
+import bossData from '../data/bosses.json';
 import commonData from '../data/pets/common.json';
 import rareData from '../data/pets/rare.json';
 import legendaryData from '../data/pets/legendary.json';
@@ -125,6 +126,10 @@ export class PetRules {
   private brains = new Map<string, PetBrain>();
   private offers = new Map<string, TameOffer>();
   private trials = new Map<string, string>();
+  /** owner id -> the boss whose Bond Trial waits for them to get back up (sim time it lapses) */
+  private pendingTrials = new Map<string, { boss: string; until: number }>();
+  /** Lines for one player's banner the host should deliver (a trial that started late). */
+  readonly announcements: Array<{ id: string; text: string }> = [];
   /** owner id -> wall time their knocked-out pet is back */
   private downUntil = new Map<string, number>();
   constructor(private sim: CombatSim, private wild: Wildlife, private groundAt: (x: number, z: number) => number) {}
@@ -198,10 +203,21 @@ export class PetRules {
     const t = this.trials.get(ownerId);
     if (t) this.wild.remove(t);
     this.trials.delete(ownerId);
+    this.pendingTrials.delete(ownerId);
   }
 
   /** Pet AI: follow, guard, fight with the owner. */
   update(dt: number, owners: Map<string, PetOwner>, now: number): void {
+    // A Bond Trial won while you were down starts once you're back on your feet.
+    for (const [ownerId, w] of [...this.pendingTrials]) {
+      const o = owners.get(ownerId);
+      if (!o || this.sim.time > w.until) this.pendingTrials.delete(ownerId);
+      else if (!o.entity.dead) {
+        this.pendingTrials.delete(ownerId);
+        const text = this.startTrial(o, w.boss);
+        if (text) this.announcements.push({ id: ownerId, text });
+      }
+    }
     for (const [ownerId, b] of [...this.brains]) {
       const o = owners.get(ownerId);
       const e = b.entity;
@@ -433,6 +449,11 @@ export class PetRules {
     const boss = bossById(bossId) as BossDef | undefined;
     if (!boss?.pet) return null;
     if (this.trials.has(o.entity.id)) return null;
+    if (o.entity.dead) {
+      // Fell in the last exchange: the spirit waits until you're back up.
+      this.pendingTrials.set(o.entity.id, { boss: boss.id, until: this.sim.time + bossData.bond.trialWaitSeconds });
+      return `${theName(boss, true)} chose you! Its spirit will find you for a Bond Trial once you're back on your feet.`;
+    }
     const e = this.wild.spawnTrial(boss, o.entity, boss.pet);
     this.trials.set(o.entity.id, e.id);
     return `Bond Trial: defeat the Spirit of ${theName(boss)} alone to bond with it!`;

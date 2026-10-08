@@ -238,6 +238,17 @@ ok(bondChance(0) === BOSS_CFG.bond.baseChance && bondChance(3) > bondChance(0) &
   ok(!!legend && petDef(legend.kind)?.tier === 'legendary', `"${text}"`);
   pets.sync(o, Date.now());
   ok(me.aura > 1, `the legendary aura raises ${me.element} power x${me.aura.toFixed(2)} while it is out`);
+  // Fell in the same exchange that felled the boss: the trial waits until you're back up.
+  const other2 = { entity: other, progress: newProgress({ level: def.level }) };
+  other.dead = true;
+  const wait = pets.startTrial(other2, def.id);
+  ok(!!wait && ![...sim.entities.values()].some((e) => e.trialOf === other.id), `a downed challenger isn't thrown into the trial: "${wait}"`);
+  pets.update(0.1, new Map([[other.id, other2]]), Date.now());
+  ok(![...sim.entities.values()].some((e) => e.trialOf === other.id), 'the spirit waits while they are down');
+  other.dead = false;
+  pets.update(0.1, new Map([[other.id, other2]]), Date.now());
+  const late = pets.announcements.splice(0);
+  ok([...sim.entities.values()].some((e) => e.trialOf === other.id && !e.dead) && late.some((a) => a.id === other.id && /Bond Trial/.test(a.text)), 'back on their feet, the spirit finds them and the banner says so');
 }
 
 // ---- Beastkeeper quest -> rare beast -> young one's trust ------------------------------

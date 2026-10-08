@@ -326,9 +326,10 @@ Pet data goes in `data/pets/*.json`.
   Everyone of the matching element who dealt at least 2% of the damage rolls for the bond: 5%, +5% per failed roll
   (bad-luck protection, saved per character), capped at 60%. Winning the roll opens a solo **Bond Trial** against
   the boss's spirit right there (no one else can hit it or be hit by it; 150 s; it uses the boss's moves at 60%
-  strength). Beat it and the legendary pet is
-  yours. While it is out: +15% element power aura (matching element), and the Sun Dragon makes lightning charge 30%
-  faster. Sun Dragon and Cloud Bison fly, the Tide Serpent swims fast.
+  strength). If the boss took you down in the same exchange, the spirit waits up to 60 s and finds you once you are
+  back on your feet. Beat it and the legendary pet is yours. While it is out: +15% element power aura (matching
+  element), and the Sun Dragon makes lightning charge 30% faster. Sun Dragon and Cloud Bison fly, the Tide Serpent
+  swims fast.
 - **Pets**: one out at a time; it follows you, attacks what you attack (or what attacks you), levels with you
   (health grows per level), and is knocked out for 45 s if it goes down. Hunger drains 6% per hour of real time;
   under 30% it fights at reduced strength and won't carry you. Feed it from the pets panel (O): berries 15,

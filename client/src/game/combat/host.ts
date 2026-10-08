@@ -399,6 +399,7 @@ export class LocalCombat implements CombatHost {
     this.wildNews(this.wild.update(dt, [owner]));
     this.pets.sync(owner, now);
     this.pets.update(dt, new Map([[this.me.id, owner]]), now);
+    for (const a of this.pets.announcements.splice(0)) this.announcements.push(a.text);
     this.slowT += dt;
     if (this.slowT >= 1) {
       this.slowT = 0;

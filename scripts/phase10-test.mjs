@@ -341,9 +341,10 @@ const xpB = await A.page.evaluate(() => window.__fw.__xp.length);
 await A.page.evaluate(() => window.__fw.host.room.send('dev:xp', 30000));
 await until(A, () => window.__fw.host.me.hp >= window.__fw.host.me.maxHp, null, 20000).catch(() => {});
 ok(await hunt(A, 'boss_sun_dragon', 200), 'the weakened Sun Dragon falls');
-await until(A, (n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason)), xpB, 20000).catch(() => {});
+// (If the dragon took you down with it you respawn in the hub, which is slow to load headless.)
+await until(A, (n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason)), xpB, 60000).catch(() => {});
 ok(await A.page.evaluate((n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason) && g.amount > 0), xpB), 'boss XP for everyone who fought');
-await until(A, () => [...window.__fw.host.entities.values()].some((e) => e.trialOf === window.__fw.host.me.id), null, 30000).catch(() => {});
+await until(A, () => [...window.__fw.host.entities.values()].some((e) => e.trialOf === window.__fw.host.me.id), null, 90000).catch(() => {});
 const trial = await A.page.evaluate(() => [...window.__fw.host.entities.values()].find((e) => e.trialOf === window.__fw.host.me.id)?.name);
 const banner = await A.page.evaluate(() => document.querySelector('.announce')?.textContent ?? '');
 ok(!!trial, `the Bond Trial opens: ${trial} (banner: "${banner}")${trial ? '' : ` notes: ${(await notes(A)).slice(-4).join(' | ')}`}`);
