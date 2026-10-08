@@ -6,8 +6,9 @@ import { mulberry32 } from '../noise';
 import { FACTIONS, NPC_CFG, type Faction } from '../factions';
 import { CombatSim, createEntity, center, canHarm, KITS, type SimEntity } from './combatSim';
 import type { ElementId, Slot } from '../combat';
+import { ARTS, masterId } from '../arts';
 
-export type NpcRole = 'vendor' | 'trainer' | 'quest' | 'guard' | 'fighter';
+export type NpcRole = 'vendor' | 'trainer' | 'quest' | 'guard' | 'fighter' | 'master';
 
 export interface NpcBrain {
   entity: SimEntity;
@@ -32,7 +33,7 @@ export function spawnNpcs(sim: CombatSim, groundAt: (x: number, z: number) => nu
   for (const f of factions) {
     const names = [...NPC_CFG.names[f.side]];
     NPC_CFG.roster.forEach((r, i) => {
-      const role = r.role as NpcRole;
+      const role = r.role as Exclude<NpcRole, 'master'>;
       const home = new Vector3(f.hub.x + r.offset[0], 0, f.hub.z + r.offset[1]);
       home.y = groundAt(home.x, home.z);
       const name = names.splice(Math.floor(rand() * names.length), 1)[0] ?? 'Nameless';
@@ -51,6 +52,21 @@ export function spawnNpcs(sim: CombatSim, groundAt: (x: number, z: number) => nu
     });
   }
   return brains;
+}
+
+/** Masters of the Special Arts, one per art with a quest, standing at their camps. */
+export function spawnMasters(sim: CombatSim, groundAt: (x: number, z: number) => number): NpcBrain[] {
+  return ARTS.filter((a) => a.master).map((a) => {
+    const m = a.master!;
+    const home = new Vector3(m.x, 0, m.z);
+    home.y = groundAt(home.x, home.z);
+    const e = createEntity({
+      id: masterId(a.id), name: m.name, kind: 'npc', team: 'masters', role: 'master', title: m.title,
+      element: a.element === 'any' ? null : a.element, level: a.level + 10, hp: 9999, maxHp: 9999, pos: home.clone(), ...CAPSULE,
+    });
+    sim.add(e);
+    return { entity: e, role: 'master' as const, home, patrolRadius: 0, waypoint: home.clone(), target: null, thinkT: 1, respawnT: 0, vel: new Vector3(), grudges: new Map() };
+  });
 }
 
 const tmp = new Vector3();
@@ -147,7 +163,7 @@ function think(b: NpcBrain, sim: CombatSim): void {
   const cur = b.target ? sim.entities.get(b.target) : undefined;
   if (cur && !cur.dead && canHarm(e, cur, sim.time) && cur.pos.distanceTo(e.pos) < NPC_CFG.leashRange) return;
   b.target = null;
-  if (b.role === 'vendor' || b.role === 'trainer' || b.role === 'quest') return;
+  if (b.role === 'vendor' || b.role === 'trainer' || b.role === 'quest' || b.role === 'master') return;
   let best = Infinity;
   for (const o of sim.entities.values()) {
     if (o.dead || o.kind === 'dummy' || !canHarm(e, o, sim.time)) continue;

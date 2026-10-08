@@ -14,6 +14,8 @@ export interface Character {
   xp?: number;
   mastery?: Record<string, number>;
   discovered?: string[];
+  arts?: unknown;
+  rank?: number;
 }
 
 export interface AccountInfo {
@@ -154,7 +156,7 @@ export class AccountClient {
 
   /** Offline characters remember where they were. */
   /** Offline characters keep position, name and progress in this browser. */
-  saveLocalCharacter(id: string, patch: Partial<Pick<Character, 'pos' | 'name' | 'level' | 'xp' | 'mastery' | 'discovered'>>): void {
+  saveLocalCharacter(id: string, patch: Partial<Pick<Character, 'pos' | 'name' | 'level' | 'xp' | 'mastery' | 'discovered' | 'arts' | 'rank'>>): void {
     const list = this.localCharacters();
     const c = list.find((x) => x.id === id);
     if (!c) return;

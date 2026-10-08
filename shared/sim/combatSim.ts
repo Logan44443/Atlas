@@ -13,7 +13,8 @@ import {
   type AbilityDef, type CombatConfig, type ElementContext, type ElementId, type ElementKit, type Slot, type StatusDef, type StatusType,
 } from '../combat';
 import { zoneAt, PVP } from '../factions';
-import { modKit, NO_MODS, PROG, type Mods } from '../progression';
+import { modKit, modAbility, NO_MODS, PROG, type Mods } from '../progression';
+import artsData from '../../data/arts.json';
 import comboData from '../../data/partyCombos.json';
 
 export interface PartyCombo {
@@ -110,6 +111,17 @@ export interface SimEntity {
   /** Last party hit on this entity, for combo detection. */
   mark: { source: string; element: ElementId; party: string; t: number } | null;
   comboReadyAt: number;
+  // Special Arts (Phase 8)
+  /** equipped art ability (the 'art' slot) */
+  art: AbilityDef | null;
+  /** knows Lightning: a perfect block redirects lightning */
+  canRedirect: boolean;
+  /** sim time until which the entity flies (Flight) */
+  flyUntil: number;
+  /** sim time until which the entity's spirit is projected */
+  spiritUntil: number;
+  /** last time this player hit or was hit by another player (healing penalty) */
+  lastPvp: number;
 }
 
 /**
@@ -119,6 +131,8 @@ export interface SimEntity {
  */
 export function canHarm(a: SimEntity, b: SimEntity, time = 0): boolean {
   if (a === b || b.dead) return false;
+  // Masters of the Special Arts are never in a fight.
+  if (a.role === 'master' || b.role === 'master') return false;
   if (a.kind === 'dummy' || b.kind === 'dummy') return a.kind !== b.kind && (a.kind === 'player' || b.kind === 'player');
   if (a.side && a.side === b.side) return false;
   const zb = zoneAt(b.pos.x, b.pos.z).kind;
@@ -140,6 +154,14 @@ export type SimEvent =
   | { t: 'reflect'; id: number; owner: string; pos: [number, number, number]; vel: [number, number, number] }
   | { t: 'hit'; target: string; source: string | null; amount: number; element: ElementId | null; result: 'hit' | 'blocked' | 'perfect' | 'dodged' | 'miss'; dot?: boolean; crit?: boolean }
   | { t: 'level'; target: string; level: number }
+  | { t: 'charge'; caster: string; ability: string; element: ElementId; duration: number }
+  | { t: 'beam'; owner: string; element: ElementId; from: [number, number, number]; to: [number, number, number]; redirected: boolean }
+  | { t: 'heal'; target: string; source: string; amount: number }
+  | { t: 'wall'; id: number; pos: [number, number, number]; radius: number; duration: number }
+  | { t: 'wallEnd'; id: number }
+  | { t: 'grab'; owner: string; target: string; duration: number }
+  | { t: 'fly'; target: string; duration: number }
+  | { t: 'spirit'; target: string; duration: number; range: number }
   | { t: 'combo'; id: number; combo: string; name: string; pos: [number, number, number]; radius: number; duration: number; members: [string, string] }
   | { t: 'status'; target: string; status: StatusType; duration: number }
   | { t: 'area'; id: number; owner: string; ability: string; element: ElementId; kind: 'ring' | 'cone'; pos: [number, number, number]; duration: number; radius: number; range: number; angle: number; swirl: boolean; follow: boolean }
@@ -220,6 +242,11 @@ export function createEntity(p: Partial<SimEntity> & Pick<SimEntity, 'id' | 'nam
     party: '',
     mark: null,
     comboReadyAt: 0,
+    art: null,
+    canRedirect: false,
+    flyUntil: 0,
+    spiritUntil: 0,
+    lastPvp: -1e9,
     ...p,
   };
 }
@@ -234,8 +261,38 @@ export function setMods(e: SimEntity, mods: Mods): void {
   e.chi = Math.min(e.chi, e.maxChi);
 }
 
-/** The caster's abilities with mastery applied. */
-export const kitOf = (e: SimEntity): ElementKit => modKit(KITS[e.element ?? 'fire'], e.mods);
+const artKits = new WeakMap<ElementKit, Map<AbilityDef, ElementKit>>();
+/** The caster's abilities with mastery applied, plus the equipped Special Art. */
+export function kitOf(e: SimEntity): ElementKit {
+  const kit = modKit(KITS[e.element ?? 'fire'], e.mods);
+  if (!e.art) return kit;
+  let byArt = artKits.get(kit);
+  if (!byArt) artKits.set(kit, (byArt = new Map()));
+  let out = byArt.get(e.art);
+  if (!out) byArt.set(e.art, (out = { ...kit, abilities: [...kit.abilities, modAbility(e.art, e.mods.slots.art)] }));
+  return out;
+}
+
+/** Allies: same entity, same party, or same side (players and NPCs). */
+export function canHelp(a: SimEntity, b: SimEntity): boolean {
+  if (b.dead || b.kind === 'dummy') return false;
+  if (a === b) return true;
+  if (a.party && a.party === b.party) return true;
+  return !!a.side && a.side === b.side;
+}
+
+interface Wall {
+  id: number;
+  pos: Vector3;
+  radius: number;
+  remaining: number;
+}
+interface Grab {
+  owner: SimEntity;
+  target: SimEntity;
+  remaining: number;
+  pull: number;
+}
 
 export const center = (e: SimEntity, out = new Vector3()) => out.copy(e.pos).setY(e.pos.y + e.height * 0.6);
 /** Where projectiles leave the caster: chest height, slightly forward along `dir`. */
@@ -251,6 +308,10 @@ export class CombatSim {
   readonly entities = new Map<string, SimEntity>();
   readonly projectiles: Projectile[] = [];
   readonly areas: Area[] = [];
+  readonly walls: Wall[] = [];
+  private grabs: Grab[] = [];
+  /** Running flight / spirit projections ("fly:id", "spirit:id"), so their end is announced once. */
+  private toggled = new Set<string>();
   events: SimEvent[] = [];
   time = 0;
   private nextId = 1;
@@ -284,12 +345,34 @@ export class CombatSim {
     const kit = kitOf(caster);
     const def = kit.abilities.find((a) => a.slot === slot);
     if (!def) return false;
+    // Recasting a toggle art ends it early (free, ignores the cooldown).
+    if (def.kind === 'flight' && caster.flyUntil > this.time) {
+      caster.flyUntil = this.time;
+      this.toggled.delete(`fly:${caster.id}`);
+      this.events.push({ t: 'fly', target: caster.id, duration: 0 });
+      return true;
+    }
+    if (def.kind === 'spirit' && caster.spiritUntil > this.time) {
+      caster.spiritUntil = this.time;
+      this.toggled.delete(`spirit:${caster.id}`);
+      this.events.push({ t: 'spirit', target: caster.id, duration: 0, range: def.range ?? 0 });
+      return true;
+    }
     if ((caster.cooldowns.get(slot) ?? 0) > 0.05) return fail('cooldown');
     if (caster.statuses.has('stagger')) return fail('Staggered');
     if (caster.blocking) return fail('Blocking');
     if (!canBend(CFG, kit, caster.ctx)) return fail('Earth needs solid ground');
     if (caster.chi < def.chiCost) return fail('Not enough chi');
     if (def.kind === 'dash' && caster.statuses.has('root')) return fail('Rooted');
+    const spirit = caster.spiritUntil > this.time;
+    if (spirit && def.kind !== 'spirit') return fail('Your spirit is away');
+    if (caster.flyUntil > this.time && !['flight', 'dash', 'shield', 'heal'].includes(def.kind)) return fail("Can't attack while flying");
+    if (def.nightOnly && caster.ctx.night < 0.5) return fail('Only at night');
+    let grabTarget: SimEntity | null = null;
+    if (def.kind === 'grab') {
+      grabTarget = this.aimTarget(caster, dirIn, def.range ?? 10, def.angle ?? 30);
+      if (!grabTarget) return fail('No one to grab');
+    }
 
     caster.chi -= def.chiCost;
     caster.cooldowns.set(slot, def.cooldown);
@@ -305,6 +388,8 @@ export class CombatSim {
       caster.comboT = 1;
       if (caster.combo === def.combo) mul = 1 + (def.comboBonus ?? 0);
     }
+
+    if (def.windup && def.windup >= 0.5) this.events.push({ t: 'charge', caster: caster.id, ability: def.id, element: el, duration: def.windup });
 
     switch (def.kind) {
       case 'projectile': {
@@ -363,8 +448,124 @@ export class CombatSim {
         if (def.selfHeal) caster.hp = Math.min(caster.maxHp, caster.hp + def.selfHeal);
         break;
       }
+      case 'heal': {
+        const a: Area = {
+          id: this.nextId++, owner: caster, ability: def, element: el, kind: 'ring', center: caster.pos.clone(), dir, follow: true,
+          remaining: def.duration ?? 3, tickAcc: 0, power,
+        };
+        this.areas.push(a);
+        this.events.push({ t: 'area', id: a.id, owner: caster.id, ability: def.id, element: el, kind: 'ring', pos: arr(a.center), duration: a.remaining, radius: def.radius ?? 6, range: 0, angle: 0, swirl: true, follow: true });
+        break;
+      }
+      case 'beam': {
+        // Lightning: stand still while it builds, then strike along the aim in an instant.
+        const charge = def.charge ?? 1.5;
+        this.applyStatus(caster.id, null, { type: 'root', duration: charge });
+        this.events.push({ t: 'charge', caster: caster.id, ability: def.id, element: el, duration: charge });
+        this.later(charge, () => {
+          if (!caster.dead && !caster.statuses.has('stagger')) this.strike(caster, def, el, dir, power);
+        });
+        break;
+      }
+      case 'pool': {
+        const at = this.groundPoint(caster, dir, def.range ?? 20);
+        const a: Area = {
+          id: this.nextId++, owner: caster, ability: def, element: el, kind: 'ring', center: at, dir, follow: false,
+          remaining: def.duration ?? 8, tickAcc: 0, power,
+        };
+        this.areas.push(a);
+        this.events.push({ t: 'area', id: a.id, owner: caster.id, ability: def.id, element: el, kind: 'ring', pos: arr(at), duration: a.remaining, radius: def.radius ?? 4, range: 0, angle: 0, swirl: false, follow: false });
+        break;
+      }
+      case 'grab': {
+        const t = grabTarget!;
+        this.hit(caster, t, def, el, power, tmp.subVectors(t.pos, caster.pos).clone(), null);
+        if (!t.dead) {
+          this.grabs.push({ owner: caster, target: t, remaining: def.duration ?? 2, pull: (def.pull ?? 6) * (caster.ctx.moonPhase > 0.95 ? 1.3 : 1) });
+          this.events.push({ t: 'grab', owner: caster.id, target: t.id, duration: def.duration ?? 2 });
+        }
+        break;
+      }
+      case 'flight':
+        caster.flyUntil = this.time + (def.stamina ?? 12);
+        this.toggled.add(`fly:${caster.id}`);
+        this.events.push({ t: 'fly', target: caster.id, duration: def.stamina ?? 12 });
+        break;
+      case 'spirit':
+        caster.spiritUntil = this.time + (def.duration ?? 15);
+        this.toggled.add(`spirit:${caster.id}`);
+        this.events.push({ t: 'spirit', target: caster.id, duration: def.duration ?? 15, range: def.range ?? 90 });
+        break;
     }
     return true;
+  }
+
+  /** Enemy closest to the aim line within range and a cone (grabs). */
+  private aimTarget(caster: SimEntity, dir: Vector3, range: number, angleDeg: number): SimEntity | null {
+    const o = center(caster);
+    const d = dir.clone().normalize();
+    const cos = Math.cos((angleDeg / 2) * (Math.PI / 180));
+    let best: SimEntity | null = null;
+    let bestDot = cos;
+    for (const t of this.enemiesOf(caster)) {
+      const to = center(t).sub(o);
+      if (to.length() - t.radius > range) continue;
+      const dot = to.normalize().dot(d);
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /** Where the aim ray meets the ground, capped at range (pools). */
+  private groundPoint(caster: SimEntity, dir: Vector3, range: number): Vector3 {
+    const o = center(caster);
+    const p = new Vector3();
+    for (let s = 1; s <= range; s += 0.5) {
+      p.copy(o).addScaledVector(dir, s);
+      if (p.y <= this.groundAt(p.x, p.z)) break;
+    }
+    p.y = this.groundAt(p.x, p.z);
+    return p;
+  }
+
+  /** Lightning's instant line strike. A perfect block from someone who knows Lightning sends it back. */
+  private strike(caster: SimEntity, def: AbilityDef, el: ElementId, dir: Vector3, power: number, redirected = false): void {
+    const from = handOf(caster, dir);
+    const range = def.range ?? 40;
+    const width = def.radius ?? 0.8;
+    let best: SimEntity | null = null;
+    let bestS = range;
+    const c = new Vector3();
+    for (const t of this.enemiesOf(caster)) {
+      center(t, c).sub(from);
+      const s = c.dot(dir);
+      if (s < 0 || s > bestS) continue;
+      const off = c.addScaledVector(dir, -s).length();
+      if (off <= t.radius + width) {
+        bestS = s;
+        best = t;
+      }
+    }
+    // Walls stop it too.
+    for (const w of this.walls) {
+      const s = tmp.subVectors(w.pos, from).dot(dir);
+      if (s > 0 && s < bestS && tmp.addScaledVector(dir, -s).setY(0).length() < w.radius) {
+        bestS = s;
+        best = null;
+      }
+    }
+    const to = from.clone().addScaledVector(dir, bestS);
+    this.events.push({ t: 'beam', owner: caster.id, element: el, from: arr(from), to: arr(to), redirected });
+    if (!best) return;
+    if (!redirected && best.canRedirect && best.blocking && this.time - best.blockStart <= CFG.block.perfectWindow) {
+      this.events.push({ t: 'hit', target: best.id, source: caster.id, amount: 0, element: el, result: 'perfect' });
+      this.strike(best, def, el, center(caster).sub(handOf(best, dir)).normalize(), power, true);
+      return;
+    }
+    this.hit(caster, best, def, el, power, dir, null);
   }
 
   /** Cone abilities track the caster's latest aim. */
@@ -444,6 +645,8 @@ export class CombatSim {
     }
     if (target.shield) dmg *= 1 - target.shield.reduction;
     dmg *= 1 - target.mods.armor;
+    if (target.spiritUntil > this.time) dmg *= target.art?.vulnerable ?? 1.5;
+    if (src.kind === 'player' && target.kind === 'player') src.lastPvp = target.lastPvp = this.time;
     dmg = Math.max(1, Math.round(dmg));
     target.hp = Math.max(0, target.hp - dmg);
     this.events.push({ t: 'hit', target: target.id, source: src.id, amount: dmg, element, result, ...(crit ? { crit } : {}) });
@@ -537,6 +740,7 @@ export class CombatSim {
     }
     this.updateProjectiles(dt);
     this.updateAreas(dt);
+    this.updateArts(dt);
     for (const e of this.entities.values()) this.updateEntity(e, dt);
   }
 
@@ -593,7 +797,11 @@ export class CombatSim {
     p.pos.addScaledVector(p.vel, dt);
     p.travelled += p.vel.length() * dt;
     if (p.travelled > (p.ability.range ?? 30) * (p.reflected ? 1.5 : 1)) return true;
-    if (p.pos.y < this.groundAt(p.pos.x, p.pos.z) + 0.1) return true;
+    if (p.pos.y < this.groundAt(p.pos.x, p.pos.z) + 0.1) {
+      if (p.ability.grapple && !p.reflected) this.zipTo(p.owner, p.pos);
+      return true;
+    }
+    for (const w of this.walls) if (Math.hypot(p.pos.x - w.pos.x, p.pos.z - w.pos.z) < w.radius && p.pos.y < w.pos.y + 3) return true;
     const pr = p.ability.radius ?? 0.4;
     const c = new Vector3();
     for (const t of this.entities.values()) {
@@ -615,6 +823,12 @@ export class CombatSim {
           return false;
         }
         if (r === 'avoided') continue;
+        if (p.ability.grapple && !t.dead) {
+          // Metal cable: drag them in (armored targets come harder).
+          const v = tmp.subVectors(p.owner.pos, t.pos).setY(0);
+          const d = v.length();
+          this.impulse(t, v.normalize().multiplyScalar((p.ability.pull ?? 14) * (t.shield ? 1.5 : 1) * Math.min(1, d / 10)).setY(3));
+        }
         return true;
       }
     }
@@ -654,6 +868,23 @@ export class CombatSim {
         }
       }
       const tick = ab.tick ?? 0.5;
+      if (ab.heal) {
+        while (a.tickAcc >= tick) {
+          a.tickAcc -= tick;
+          // Healing is weaker while the healer is fighting other players.
+          const scale = this.time - a.owner.lastPvp < artsData.pvpCombatSeconds ? artsData.pvpHealScale : 1;
+          for (const t of this.entities.values()) {
+            if (!canHelp(a.owner, t) || Math.hypot(t.pos.x - a.center.x, t.pos.z - a.center.z) > (ab.radius ?? 6) + t.radius) continue;
+            for (const st of ab.cleanse ?? []) t.statuses.delete(st);
+            const amount = Math.min(t.maxHp - t.hp, Math.round(ab.heal * a.power * scale));
+            if (amount <= 0) continue;
+            t.hp += amount;
+            this.events.push({ t: 'heal', target: t.id, source: a.owner.id, amount });
+          }
+        }
+        if (a.remaining <= 0 || a.owner.dead) this.areas.splice(i, 1);
+        continue;
+      }
       while (a.tickAcc >= tick) {
         a.tickAcc -= tick;
         const o = handOf(a.owner, a.dir);
@@ -671,7 +902,59 @@ export class CombatSim {
           }
         }
       }
-      if (a.remaining <= 0 || a.owner.dead) this.areas.splice(i, 1);
+      if (a.remaining <= 0 || (a.owner.dead && !ab.wallSeconds)) {
+        this.areas.splice(i, 1);
+        // Lava cools into a rock wall.
+        if (ab.wallSeconds) {
+          const w: Wall = { id: this.nextId++, pos: a.center.clone(), radius: (ab.radius ?? 4) * 0.8, remaining: ab.wallSeconds };
+          this.walls.push(w);
+          this.events.push({ t: 'wall', id: w.id, pos: arr(w.pos), radius: w.radius, duration: w.remaining });
+        }
+      }
+    }
+  }
+
+  /** Metal cable struck ground: pull the caster there. */
+  private zipTo(owner: SimEntity, at: Vector3): void {
+    const v = tmp.subVectors(at, owner.pos);
+    const dist = Math.max(0, Math.hypot(v.x, v.z) - 1.5);
+    if (dist < 2) return;
+    const dir = v.setY(0).normalize();
+    this.events.push({ t: 'dash', owner: owner.id, element: owner.element ?? 'earth', dir: arr(dir), distance: dist, duration: Math.min(0.9, dist / 32), lift: Math.max(0, at.y - owner.pos.y) * 0.5 + 1 });
+  }
+
+  /** Walls, grabs, flight stamina and spirit time (called from update). */
+  private updateArts(dt: number): void {
+    for (let i = this.walls.length - 1; i >= 0; i--) {
+      const w = this.walls[i];
+      w.remaining -= dt;
+      if (w.remaining <= 0) {
+        this.walls.splice(i, 1);
+        this.events.push({ t: 'wallEnd', id: w.id });
+      }
+    }
+    for (let i = this.grabs.length - 1; i >= 0; i--) {
+      const g = this.grabs[i];
+      g.remaining -= dt;
+      if (g.remaining <= 0 || g.target.dead || g.owner.dead) {
+        this.grabs.splice(i, 1);
+        continue;
+      }
+      const v = tmp.subVectors(g.owner.pos, g.target.pos).setY(0);
+      if (v.length() > 2) g.target.pendingImpulse.add(v.normalize().multiplyScalar(g.pull * dt * 3));
+    }
+    for (const e of this.entities.values()) {
+      if (e.flyUntil > this.time && this.time - e.lastCombat < CFG.chi.combatTimeout) e.flyUntil -= dt * (artsData.flight.combatDrain - 1);
+      if (e.dead) e.flyUntil = e.spiritUntil = 0;
+    }
+    // Flight and spirit projection running out (or ended by death) tell the client to land / return.
+    for (const key of this.toggled) {
+      const [kind, id] = key.split(':') as ['fly' | 'spirit', string];
+      const e = this.entities.get(id);
+      const until = e ? (kind === 'fly' ? e.flyUntil : e.spiritUntil) : 0;
+      if (until > this.time) continue;
+      this.toggled.delete(key);
+      if (e) this.events.push(kind === 'fly' ? { t: 'fly', target: id, duration: 0 } : { t: 'spirit', target: id, duration: 0, range: 0 });
     }
   }
 }

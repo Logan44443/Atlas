@@ -4,9 +4,10 @@ import progressionData from '../data/progression.json';
 
 export type ElementId = 'fire' | 'water' | 'earth' | 'air';
 export const ELEMENTS: ElementId[] = ['fire', 'water', 'earth', 'air'];
-export type Slot = 'basic' | 'heavy' | 'mobility' | 'defense' | 'control' | 'ultimate';
-export const SLOTS: Slot[] = ['basic', 'heavy', 'control', 'defense', 'mobility', 'ultimate'];
-export type AbilityKind = 'projectile' | 'melee' | 'dash' | 'shield' | 'ring' | 'cone';
+export type Slot = 'basic' | 'heavy' | 'mobility' | 'defense' | 'control' | 'ultimate' | 'art';
+/** 'art' holds the equipped Special Art (Phase 8). */
+export const SLOTS: Slot[] = ['basic', 'heavy', 'control', 'defense', 'mobility', 'ultimate', 'art'];
+export type AbilityKind = 'projectile' | 'melee' | 'dash' | 'shield' | 'ring' | 'cone' | 'heal' | 'beam' | 'pool' | 'grab' | 'flight' | 'spirit';
 export type StatusType = 'burn' | 'slow' | 'root' | 'stagger' | 'blind';
 
 export interface StatusDef {
@@ -47,6 +48,23 @@ export interface AbilityDef {
   selfHeal?: number;
   /** synthetic ability for a party combo area (never chains another combo) */
   partyCombo?: boolean;
+  // Special Arts (Phase 8)
+  /** heal per tick for allies in the area */
+  heal?: number;
+  /** statuses removed from healed allies */
+  cleanse?: StatusType[];
+  /** seconds the caster stands still charging before the effect (Lightning) */
+  charge?: number;
+  /** projectile that drags a hit enemy to the caster, or pulls the caster to the ground it strikes */
+  grapple?: boolean;
+  /** only castable at night */
+  nightOnly?: boolean;
+  /** pool areas cool into a projectile-blocking wall for this long */
+  wallSeconds?: number;
+  /** flight seconds */
+  stamina?: number;
+  /** damage taken multiplier while projecting */
+  vulnerable?: number;
   status?: StatusDef;
   vfx: string;
   anim: string;

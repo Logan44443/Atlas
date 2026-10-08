@@ -66,3 +66,6 @@ export function elementContextAt(
   const sun = sunDirOf(hourOf(days));
   return { night: nightFactorOf(sun.y), sunHeight: sun.y, moonPhase: moonPhaseOf(days), nearWater, onRock, grounded };
 }
+
+/** 0 by day, 1 at full night, at a world time (in-game days). */
+export const nightAt = (days: number): number => nightFactorOf(sunDirOf(hourOf(days)).y);

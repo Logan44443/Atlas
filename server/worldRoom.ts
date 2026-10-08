@@ -10,8 +10,9 @@ import { TerrainSampler } from '../shared/terrain';
 import { terrainConfig } from '../shared/factions';
 import { CombatSim, CFG, createEntity, setMods, type SimEntity, type SimEvent } from '../shared/sim/combatSim';
 import { spawnDummies, updateDummy, type DummyBrain } from '../shared/sim/dummies';
-import { spawnNpcs, updateNpc, type NpcBrain } from '../shared/sim/npcs';
-import { elementContextAt, worldDays } from '../shared/clock';
+import { spawnNpcs, spawnMasters, updateNpc, type NpcBrain } from '../shared/sim/npcs';
+import { elementContextAt, worldDays, nightAt } from '../shared/clock';
+import { QuestRules, sanitizeArts, equippedAbility, artById, ARTS, masterId, type QuestNews } from '../shared/arts';
 import { NET, type CastMsg, type JoinOptions, type MoveMsg, type WelcomeMsg, type CorrectMsg, type V3, type XpMsg, type PartyInfo, type InviteMsg } from '../shared/net';
 import { XpRules, addXp, computeMods, newProgress, sanitizeAlloc, PROG, type Progress, type XpAward } from '../shared/progression';
 import { Parties } from './parties';
@@ -20,6 +21,7 @@ import { EntityState, WorldState } from './schema';
 import { factionById, hubSpawn, PVP } from '../shared/factions';
 import { validateName } from '../shared/names';
 import accountData from '../data/accounts.json';
+import timeData from '../data/time.json';
 import type { Account, CharacterRow, Store } from './db/store';
 
 interface AuthResult {
@@ -55,6 +57,9 @@ interface PlayerData {
   progress: Progress;
   /** sim time of the last respawn (no XP for spawn kills) */
   respawnedAt: number;
+  /** seconds standing still (meditation) */
+  still: number;
+  stillFrom: Vector3;
 }
 
 export function cleanName(raw: unknown): string {
@@ -74,8 +79,11 @@ export class WorldRoom extends Room<WorldState> {
   private players = new Map<string, PlayerData>();
   private spawn = new Vector3(worldData.spawn.x, 0, worldData.spawn.z);
   private xp = new XpRules();
+  private quests = new QuestRules();
   private parties = new Parties();
   private slowT = 0;
+  /** dev builds: shift this shard's world clock (tests for night-only arts) */
+  private clockShiftMs = 0;
 
   onCreate(): void {
     const state = new WorldState();
@@ -84,7 +92,7 @@ export class WorldRoom extends Room<WorldState> {
     this.setPatchRate(1000 / NET.patchRate);
     this.spawn.y = Math.max(groundAt(this.spawn.x, this.spawn.z), worldData.seaLevel);
     this.brains = spawnDummies(this.sim, this.spawn, groundAt);
-    this.npcs = spawnNpcs(this.sim, groundAt);
+    this.npcs = [...spawnNpcs(this.sim, groundAt), ...spawnMasters(this.sim, groundAt)];
     for (const e of this.sim.entities.values()) this.state.entities.set(e.id, this.newState(e));
 
     this.onMessage('move', (c, m: MoveMsg) => this.onMove(c, m));
@@ -115,6 +123,13 @@ export class WorldRoom extends Room<WorldState> {
     });
     // Dev builds let tests and the free camera move players anywhere.
     if (DEV) {
+      // Tests: grant XP, shift the shard clock by hours.
+      this.onMessage('dev:xp', (c, amount: number) => {
+        if (Number.isFinite(amount) && amount > 0) this.grant({ id: c.sessionId, amount: Math.min(1e7, amount), reason: 'dev' });
+      });
+      this.onMessage('dev:clock', (_c, hours: number) => {
+        if (Number.isFinite(hours)) this.clockShiftMs = hours * (timeData.dayLengthMinutes * 60_000) / 24;
+      });
       this.onMessage('tp', (c, pos: V3) => {
         const p = this.players.get(c.sessionId);
         if (!p || !finite(pos)) return;
@@ -123,7 +138,27 @@ export class WorldRoom extends Room<WorldState> {
         p.lastT = Date.now();
       });
     }
-    this.onMessage('ping', (c, t: number) => c.send('pong', { t, s: Date.now() }));
+    this.onMessage('ping', (c, t: number) => c.send('pong', { t, s: this.now() }));
+
+    // Special Arts: talk to a master (quests), equip a learned art.
+    this.onMessage('quest:talk', (c, npcId: string) => {
+      const p = this.players.get(c.sessionId);
+      const art = ARTS.find((a) => masterId(a.id) === npcId);
+      const npc = this.sim.entities.get(String(npcId));
+      if (!p || !art || !npc || npc.pos.distanceTo(p.entity.pos) > 8) return;
+      const news = this.quests.talk(p, art.id, this.night());
+      c.send('quest', { art: art.id, npc: npc.id, line: news.line ?? '' });
+      this.applyQuestNews(p, news);
+    });
+    this.onMessage('art:equip', (c, id: string | null) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const a = p.progress.arts;
+      if (id !== null && (!a.learned.includes(String(id)) || !artById(String(id))?.ability)) return;
+      a.equipped = id === null ? null : String(id);
+      this.applyArts(p);
+      c.send('progress', p.progress);
+    });
 
     // Mastery: the client sends its whole allocation; the server keeps what the rules allow.
     this.onMessage('mastery', (c, alloc: unknown) => {
@@ -202,7 +237,7 @@ export class WorldRoom extends Room<WorldState> {
       pos = new Vector3(sp.x, 0, sp.z);
     }
     pos.y = Math.max(groundAt(pos.x, pos.z), worldData.seaLevel);
-    const progress = newProgress({ level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])] });
+    const progress = newProgress({ level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])], rank: c.rank, arts: sanitizeArts(c.element, c.arts) });
     progress.mastery = sanitizeAlloc(c.element, progress.level, c.mastery);
     const entity = createEntity({
       id: client.sessionId, name: c.name, kind: 'player', team: 'players', element: c.element, pos, level: c.level,
@@ -210,17 +245,19 @@ export class WorldRoom extends Room<WorldState> {
     });
     setMods(entity, computeMods(c.element, progress.mastery));
     entity.hp = entity.maxHp;
+    entity.art = equippedAbility(progress.arts);
+    entity.canRedirect = progress.arts.learned.includes('lightning');
     entity.protectedUntil = this.sim.time + PVP.spawnProtectionSeconds;
     this.sim.add(entity);
     this.players.set(client.sessionId, {
       entity, last: pos.clone(), lastT: Date.now(), allowance: 0, lastDodge: -1e9, invSince: -1, swimming: false, aim: new Vector3(0, 0, 1), seq: 0, deadT: 0,
-      characterId: c.id, pvpToggleT: -1e9, progress, respawnedAt: this.sim.time,
+      characterId: c.id, pvpToggleT: -1e9, progress, respawnedAt: this.sim.time, still: 0, stillFrom: pos.clone(),
     });
     const st = this.newState(entity);
     this.state.entities.set(entity.id, st);
     client.view = new StateView();
     client.view.add(st);
-    const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: Date.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level, progress };
+    const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: this.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level, progress };
     client.send('welcome', welcome);
     console.log(`[${this.roomId}] ${entity.name} (${c.faction} ${c.element}) joined (${this.clients.length}/${this.maxClients})`);
   }
@@ -229,8 +266,33 @@ export class WorldRoom extends Room<WorldState> {
     const e = p.entity;
     const pr = p.progress;
     return WorldRoom.store
-      .saveCharacter(p.characterId, { pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)], level: pr.level, xp: pr.xp, mastery: pr.mastery, discovered: pr.discovered })
+      .saveCharacter(p.characterId, {
+        pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)], level: pr.level, xp: pr.xp, mastery: pr.mastery, discovered: pr.discovered,
+        arts: pr.arts, rank: pr.rank,
+      })
       .catch((err) => console.error('[db] save failed', err));
+  }
+
+  /** Wall time as this shard's world clock sees it. */
+  private now(): number {
+    return Date.now() + this.clockShiftMs;
+  }
+
+  private night(): number {
+    return nightAt(worldDays(this.now()));
+  }
+
+  private applyArts(p: PlayerData): void {
+    p.entity.art = equippedAbility(p.progress.arts);
+    p.entity.canRedirect = p.progress.arts.learned.includes('lightning');
+  }
+
+  private applyQuestNews(p: PlayerData, news: QuestNews): void {
+    const c = this.clientOf(p.entity.id);
+    if (news.notice) c?.send('notice', { text: news.notice });
+    if (news.rankLoss) p.progress.rank = Math.max(1, p.progress.rank - news.rankLoss);
+    if (news.learned) this.applyArts(p);
+    c?.send('progress', p.progress);
   }
 
   private clientOf(id: string): Client | undefined {
@@ -246,6 +308,8 @@ export class WorldRoom extends Room<WorldState> {
     if (levelUp) {
       const e = p.entity;
       e.level = p.progress.level;
+      const passive = this.quests.checkPassive(p);
+      if (passive) this.applyQuestNews(p, passive);
       // Level-ups refill health and chi.
       if (!e.dead) {
         e.hp = e.maxHp;
@@ -262,6 +326,8 @@ export class WorldRoom extends Room<WorldState> {
     const killer = sourceId ? this.players.get(sourceId) : undefined;
     if (!victim || !killer || victim === killer.entity) return;
     for (const a of this.xp.onKill(victim, killer, this.players, this.parties.membersOf(killer.entity.id), this.sim.time)) this.grant(a);
+    const night = this.night();
+    for (const n of this.quests.onKill(killer, victim, night)) this.applyQuestNews(killer, n);
   }
 
   // ---- parties -------------------------------------------------------------
@@ -334,7 +400,8 @@ export class WorldRoom extends Room<WorldState> {
     if (Math.abs(to.x) > HALF_WORLD || Math.abs(to.z) > HALF_WORLD) reject = 'edge of the world';
     else if (dist > budget) reject = 'too fast';
     else if (to.y < Math.min(ground, worldData.seaLevel - characterData.swim.depth - 1) - mv.maxBelowGround) reject = 'under ground';
-    else if (to.y > ground + mv.maxAboveGround) reject = 'too high';
+    else if (to.y > ground + mv.maxAboveGround && e.flyUntil + 4 < this.sim.time) reject = 'too high';
+    else if (e.spiritUntil > this.sim.time && dist > mv.slackMeters + p.allowance) reject = 'spirit projecting';
     else if ((e.statuses.has('root') || e.statuses.has('stagger')) && dist > mv.slackMeters + p.allowance) reject = 'rooted';
     if (reject) {
       const msg: CorrectMsg = { seq: p.seq, p: arr(p.last), reason: reject };
@@ -372,7 +439,7 @@ export class WorldRoom extends Room<WorldState> {
     const dir = new Vector3(m.dir[0], m.dir[1], m.dir[2]);
     if (dir.lengthSq() < 1e-4) return;
     const e = p.entity;
-    e.ctx = elementContextAt(sampler, worldData, CFG.elements.water.nearWaterMeters, e.pos, worldDays(Date.now()), p.swimming, e.grounded);
+    e.ctx = elementContextAt(sampler, worldData, CFG.elements.water.nearWaterMeters, e.pos, worldDays(this.now()), p.swimming, e.grounded);
     this.sim.cast(e, m.slot, dir);
   }
 
@@ -412,9 +479,14 @@ export class WorldRoom extends Room<WorldState> {
     this.slowT += dt;
     if (this.slowT >= 1) {
       this.slowT = 0;
+      const night = this.night();
       for (const p of this.players.values()) {
         const a = this.xp.discover(p);
         if (a) this.grant(a);
+        // Meditation needs you to stand still.
+        p.still = p.entity.pos.distanceTo(p.stillFrom) < 0.6 ? p.still + 1 : 0;
+        p.stillFrom.copy(p.entity.pos);
+        for (const n of this.quests.tick(p, night)) this.applyQuestNews(p, n);
         if (this.parties.of(p.entity.id)) this.clientOf(p.entity.id)?.send('party', this.partyInfo(p.entity.id));
       }
     }
@@ -492,7 +564,20 @@ export class WorldRoom extends Room<WorldState> {
       case 'combo':
         return near(ev.pos[0], ev.pos[2]);
       case 'level':
+      case 'heal':
+      case 'fly':
+      case 'spirit':
         return nearId(ev.target);
+      case 'charge':
+        return nearId(ev.caster);
+      case 'beam':
+        return near(ev.from[0], ev.from[2]) || near(ev.to[0], ev.to[2]);
+      case 'wall':
+        return near(ev.pos[0], ev.pos[2]);
+      case 'wallEnd':
+        return true;
+      case 'grab':
+        return nearId(ev.target) || nearId(ev.owner);
     }
   }
 

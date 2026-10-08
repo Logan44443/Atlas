@@ -238,3 +238,33 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f1c; col
 .floater.combo { color: #bff0ff; font-size: 18px; font-weight: 800; letter-spacing: 0.06em; }
 .blind-fog { position: fixed; inset: 0; z-index: 11; pointer-events: none; background: radial-gradient(circle at 50% 50%, rgba(235,240,245,0.25), rgba(235,240,245,0.85) 70%); transition: opacity 0.4s; opacity: 0; }
 .blind-fog.on { opacity: 1; }
+
+/* Special Arts (Phase 8) */
+.arts .a-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-top: 12px; }
+.a-art { padding: 10px 12px; cursor: default; display: flex; flex-direction: column; gap: 4px; }
+.a-art .a-top { display: flex; justify-content: space-between; align-items: baseline; }
+.a-art .m-rank { position: static; transform: none; }
+.a-art .a-lim { opacity: 0.8; font-style: italic; }
+.a-art .a-status { font-size: 12px; color: #9fe39a; margin-top: 2px; }
+.a-art.idle .a-status { color: var(--muted); }
+.a-art .a-hint { color: #9fc6e8 !important; }
+.a-art .a-btns { display: flex; gap: 6px; margin-top: 4px; }
+.a-art .a-btns button { font: inherit; font-size: 12px; cursor: pointer; border-radius: 7px; padding: 4px 10px; border: 1px solid #c99a2e; background: #3a3018; color: #ffd76a; }
+.a-art .a-btns button.secondary { border-color: #2c344a; background: #1c2233; color: var(--ink); }
+.a-art.idle, .a-art.some { opacity: 1; }
+.a-bounty { color: #ff8a7a; margin-left: 8px; }
+.quest-compass { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); z-index: 16; padding: 3px 12px; border-radius: 999px;
+  background: rgba(10, 14, 24, 0.6); color: var(--ink); font-size: 12px; display: flex; gap: 8px; align-items: center; pointer-events: none; }
+.quest-compass .arrow { display: inline-block; color: #7fd8ff; transition: transform 0.15s; }
+.quest-compass.hidden { display: none; }
+.dialog .quest-tag { color: #ffb35a; font-size: 11px; margin-top: 4px; }
+.spirit-veil { position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: 0; transition: opacity 0.6s;
+  background: radial-gradient(ellipse at center, rgba(120, 220, 255, 0) 45%, rgba(110, 200, 255, 0.35) 100%); }
+.spirit-veil.on { opacity: 1; }
+.flight-bar { position: fixed; left: 50%; bottom: 128px; transform: translateX(-50%); width: 180px; height: 6px; border-radius: 3px; z-index: 15;
+  background: rgba(10, 14, 24, 0.6); overflow: hidden; }
+.flight-bar .fill { height: 100%; background: #dfe9f2; }
+.flight-bar.hidden { display: none; }
+.reveal-layer { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
+.reveal { position: absolute; transform: translate(-50%, -100%); color: #ff7a6a; font-size: 13px; font-weight: 700; text-shadow: 0 0 6px rgba(255, 60, 40, 0.8); white-space: nowrap; }
+.floater.heal { color: #7dffb0; font-size: 15px; }

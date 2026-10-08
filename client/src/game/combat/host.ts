@@ -1,10 +1,11 @@
-import type * as THREE from 'three/webgpu';
+import * as THREE from 'three/webgpu';
 import type { Slot } from '@shared/combat';
 import { CombatSim, createEntity, setMods, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import { XpRules, addXp, computeMods, newProgress, sanitizeAlloc, type Progress, type XpPlayer } from '@shared/progression';
 import type { InviteMsg, PartyInfo } from '@shared/net';
 import { spawnDummies, updateDummy, type DummyBrain } from '@shared/sim/dummies';
-import { spawnNpcs, updateNpc, type NpcBrain } from '@shared/sim/npcs';
+import { spawnNpcs, spawnMasters, updateNpc, type NpcBrain } from '@shared/sim/npcs';
+import { QuestRules, sanitizeArts, equippedAbility, artById, ARTS, masterId, type QuestNews } from '@shared/arts';
 import characterData from '@data/character.json';
 
 /** Where combat rules run: in this tab (offline) or on the shard server (online). */
@@ -28,6 +29,12 @@ export interface CombatHost {
   setMastery(alloc: Record<string, number>): void;
   respec(): void;
 
+  // Special Arts (Phase 8): talk to masters, equip a learned art.
+  /** Masters' answers since the UI last drained them. */
+  readonly questLines: QuestLine[];
+  talkTo(npcId: string): void;
+  equipArt(id: string | null): void;
+
   // Parties (online only).
   readonly party: PartyInfo | null;
   readonly invites: InviteMsg[];
@@ -35,6 +42,18 @@ export interface CombatHost {
   answerInvite(accept: boolean): void;
   leaveParty(): void;
   kick(entityId: string): void;
+}
+
+export interface QuestLine {
+  art: string;
+  npc: string;
+  line: string;
+}
+
+/** Push the art state into the entity (equipped ability, lightning redirect). */
+export function applyArtsToEntity(e: SimEntity, p: Progress): void {
+  e.art = equippedAbility(p.arts);
+  e.canRedirect = p.arts.learned.includes('lightning');
 }
 
 export interface XpGain {
@@ -62,23 +81,53 @@ export class LocalCombat implements CombatHost {
   readonly notices: Array<{ text: string; warn?: boolean }> = [];
   readonly party = null;
   readonly invites: InviteMsg[] = [];
+  readonly questLines: QuestLine[] = [];
   private reviveT = -1;
   private xp = new XpRules();
+  private quests = new QuestRules();
+  private still = 0;
+  private stillFrom = new THREE.Vector3();
   private self: XpPlayer;
   private slowT = 0;
 
   constructor(name: string, element: SimEntity['element'], spawn: { x: number; z: number }, private groundAt: (x: number, z: number) => number, progress?: Partial<Progress>) {
     this.sim = new CombatSim(groundAt);
     this.me = createPlayerEntity('player', name, element);
-    this.progress = newProgress({ ...progress, mastery: {} });
+    this.progress = newProgress({ ...progress, mastery: {}, arts: sanitizeArts(element, progress?.arts) });
     if (element) this.progress.mastery = sanitizeAlloc(element, this.progress.level, progress?.mastery);
+    applyArtsToEntity(this.me, this.progress);
     this.me.level = this.progress.level;
     setMods(this.me, computeMods(element, this.progress.mastery));
     this.me.hp = this.me.maxHp;
     this.sim.add(this.me);
     this.self = { entity: this.me, progress: this.progress, respawnedAt: 0 };
     this.brains = spawnDummies(this.sim, spawn, groundAt);
-    this.npcs = spawnNpcs(this.sim, groundAt);
+    this.npcs = [...spawnNpcs(this.sim, groundAt), ...spawnMasters(this.sim, groundAt)];
+  }
+
+  talkTo(npcId: string): void {
+    const art = ARTS.find((a) => masterId(a.id) === npcId);
+    if (!art) return;
+    const news = this.quests.talk(this.questPlayer(), art.id, this.me.ctx.night);
+    this.questLines.push({ art: art.id, npc: npcId, line: news.line ?? '' });
+    this.questNews(news);
+  }
+
+  equipArt(id: string | null): void {
+    const a = this.progress.arts;
+    if (id !== null && (!a.learned.includes(id) || !artById(id)?.ability)) return;
+    a.equipped = id;
+    applyArtsToEntity(this.me, this.progress);
+  }
+
+  private questPlayer() {
+    return { entity: this.me, progress: this.progress, still: this.still };
+  }
+
+  private questNews(n: QuestNews): void {
+    if (n.notice) this.notices.push({ text: n.notice });
+    if (n.rankLoss) this.progress.rank = Math.max(1, this.progress.rank - n.rankLoss);
+    if (n.learned) applyArtsToEntity(this.me, this.progress);
   }
 
   setMastery(alloc: Record<string, number>): void {
@@ -103,6 +152,8 @@ export class LocalCombat implements CombatHost {
     const levelUp = addXp(this.progress, amount);
     if (levelUp) {
       this.me.level = this.progress.level;
+      const passive = this.quests.checkPassive(this.questPlayer());
+      if (passive) this.questNews(passive);
       this.me.hp = this.me.maxHp;
       this.me.chi = this.me.maxChi;
       this.sim.events.push({ t: 'level', target: this.me.id, level: this.me.level });
@@ -129,13 +180,18 @@ export class LocalCombat implements CombatHost {
     for (const ev of this.sim.events) {
       if (ev.t !== 'death' || ev.source !== this.me.id || ev.target === this.me.id) continue;
       const victim = this.sim.entities.get(ev.target);
-      if (victim) for (const a of this.xp.onKill(victim, this.self, new Map([[this.me.id, this.self]]), [this.me.id], this.sim.time)) this.grant(a.amount, a.reason);
+      if (!victim) continue;
+      for (const a of this.xp.onKill(victim, this.self, new Map([[this.me.id, this.self]]), [this.me.id], this.sim.time)) this.grant(a.amount, a.reason);
+      for (const n of this.quests.onKill(this.questPlayer(), victim, this.me.ctx.night)) this.questNews(n);
     }
     this.slowT += dt;
     if (this.slowT >= 1) {
       this.slowT = 0;
       const a = this.xp.discover(this.self);
       if (a) this.grant(a.amount, a.reason);
+      this.still = this.me.pos.distanceTo(this.stillFrom) < 0.6 ? this.still + 1 : 0;
+      this.stillFrom.copy(this.me.pos);
+      for (const n of this.quests.tick(this.questPlayer(), this.me.ctx.night)) this.questNews(n);
     }
     // No death penalty offline: get back up after a moment.
     if (this.me.dead && this.reviveT < 0) this.reviveT = 2;

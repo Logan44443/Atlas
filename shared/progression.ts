@@ -6,6 +6,7 @@ import masteryData from '../data/mastery.json';
 import type { AbilityDef, ElementId, ElementKit, Slot } from './combat';
 import { SLOTS } from './combat';
 import { FACTIONS, CONTESTED, PVP, zoneAt } from './factions';
+import { newArtsState, type ArtsState } from './arts';
 import type { SimEntity } from './sim/combatSim';
 
 export const PROG = progressionData;
@@ -23,10 +24,14 @@ export interface Progress {
   xp: number;
   mastery: Record<string, number>;
   discovered: string[];
+  /** Special Arts: learned, equipped, quests in progress (Phase 8) */
+  arts: ArtsState;
+  /** faction rank 1-10 */
+  rank: number;
 }
 
 export function newProgress(p: Partial<Progress> = {}): Progress {
-  return { level: 1, xp: 0, mastery: {}, discovered: [], ...p };
+  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, ...p };
 }
 
 /** Adds XP (levelling up as needed) and returns how many levels were gained. */
@@ -174,7 +179,7 @@ export function modKit(kit: ElementKit, mods: Mods): ElementKit {
   return out;
 }
 
-function modAbility(a: AbilityDef, m: SlotMods): AbilityDef {
+export function modAbility(a: AbilityDef, m: SlotMods): AbilityDef {
   const d: AbilityDef = { ...a };
   d.damage = a.damage * (1 + m.dmg);
   d.cooldown = a.cooldown * (1 - m.cd);

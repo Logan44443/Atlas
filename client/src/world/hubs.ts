@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { mrt, vec4, color } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { FACTIONS, CONTESTED, type Faction } from '@shared/factions';
+import { ARTS } from '@shared/arts';
 import { TOON_RAMP } from './materials';
 import { registerBloomSource } from '../engine/renderer';
 import type { Physics } from '../game/physics';
@@ -170,6 +171,28 @@ function buildShrine(groundY: number): { geo: THREE.BufferGeometry | null; lante
   return { geo: b.build(), lanterns: [new THREE.Vector3(0, y0 + 6.2, 0)], boxes: b.boxes };
 }
 
+/** A master's camp: sitting mat, small tent and a lantern post. */
+function buildCamp(groundY: number): { geo: THREE.BufferGeometry | null; lanterns: THREE.Vector3[]; boxes: Builder['boxes'] } {
+  const b = new Builder();
+  const y0 = groundY - 0.2;
+  b.add(CYL, '#7b3f2a', 0, y0 + 0.25, 0, 0, 3.2, 0.1, 3.2);
+  b.add(TENT, '#c9b48a', 4, y0 + 1.4, -2.5, 0.4, 2.2, 2.8, 2.2);
+  b.boxes.push({ c: new THREE.Vector3(4, y0 + 1, -2.5), h: new THREE.Vector3(1.4, 1, 1.4), yaw: 0 });
+  b.add(CYL, '#4a3a2a', -2.6, y0 + 1.4, 1.6, 0, 0.12, 2.8, 0.12);
+  for (let k = 0; k < 5; k++) b.add(BOX, '#8a8580', Math.cos(k * 1.3) * 2.2, y0 + 0.15, Math.sin(k * 1.3) * 2.2 + 0.4, k, 0.5, 0.35, 0.4);
+  return { geo: b.build(), lanterns: [new THREE.Vector3(-2.6, y0 + 3, 1.6)], boxes: b.boxes };
+}
+
+/** A stone cairn marking a quest point (springs, veins, summits). */
+function buildCairn(groundY: number): { geo: THREE.BufferGeometry | null; lanterns: THREE.Vector3[]; boxes: Builder['boxes'] } {
+  const b = new Builder();
+  const y0 = groundY - 0.2;
+  b.add(BOX, '#77736c', 0, y0 + 0.4, 0, 0.3, 1.4, 0.8, 1.2);
+  b.add(BOX, '#8d8a84', 0, y0 + 1.1, 0, 1.0, 1.0, 0.6, 0.9);
+  b.add(BOX, '#a7a39b', 0, y0 + 1.6, 0, 0.5, 0.6, 0.5, 0.6);
+  return { geo: b.build(), lanterns: [new THREE.Vector3(0, y0 + 2.2, 0)], boxes: [] };
+}
+
 /** Faction hub towns and contested-zone shrines, plus their wall/building colliders. */
 export class Hubs {
   readonly group = new THREE.Group();
@@ -181,6 +204,22 @@ export class Hubs {
     const sites: Array<{ x: number; z: number; color: string; built: ReturnType<typeof buildHub> }> = [];
     for (const f of FACTIONS) sites.push({ x: f.hub.x, z: f.hub.z, color: f.color, built: buildHub(f, groundAt(f.hub.x, f.hub.z)) });
     for (const c of CONTESTED) sites.push({ x: c.x, z: c.z, color: '#ffd27a', built: buildShrine(groundAt(c.x, c.z)) });
+    // Special Arts: masters' camps and quest cairns (shrines already have a building).
+    const marked = new Set<string>([...CONTESTED, ...ARTS.flatMap((a) => (a.master ? [a.master] : []))].map((c) => `${c.x},${c.z}`));
+    for (const art of ARTS) {
+      if (art.master) sites.push({ x: art.master.x, z: art.master.z, color: '#ffb35a', built: buildCamp(groundAt(art.master.x, art.master.z)) });
+      for (const step of art.steps) {
+        for (const pt of step.points ?? []) {
+          const near = [...marked].some((k) => {
+            const [x, z] = k.split(',').map(Number);
+            return Math.hypot(x - pt.x, z - pt.z) < 25;
+          });
+          if (near) continue;
+          marked.add(`${pt.x},${pt.z}`);
+          sites.push({ x: pt.x, z: pt.z, color: '#7fd8ff', built: buildCairn(groundAt(pt.x, pt.z)) });
+        }
+      }
+    }
 
     for (const site of sites) {
       const { geo, lanterns, boxes } = site.built;

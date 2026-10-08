@@ -133,6 +133,7 @@ Default PC layout (third-person action, keyboard + mouse):
 | Cycle target / interact | Tab / G |
 | Toggle PvP flag | P |
 | Mastery tree / invite to party / accept / decline | K / I / Y / N |
+| Special Art (equipped) / Arts & quests panel | T / J |
 
 - **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
   mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
@@ -181,6 +182,29 @@ Default PC layout (third-person action, keyboard + mouse):
 | Flight | Air | Glider at Lv 10; true flight at Lv 40 + mountain monastery trial | Free 3D flight on a stamina bar | Can't use offensive abilities while flying; stamina drains faster in combat |
 | Bloodbending | Water | Lv 40 + forbidden quest; at night only (stronger under a full moon) | Grab one target within 10 m: root or drag them for 2 s | 60 s cooldown and huge chi cost. Order players who learn it lose faction rank and gain a bounty. Hollow Moon Cult has no penalty. |
 | Spirit Projection | Any | Lv 45 + spirit-world questline | Leave your body as a spirit to scout or reveal hidden enemies | Your body is vulnerable while you're out |
+
+**As built (Phase 8)**: every art except the Glider has a **master NPC** with a camp somewhere in the world and a
+quest of steps (`talk`, `visit` points, `kill` enemies, `meditate` = stand still at a point for N seconds). Talk to
+the master with the interact key once you reach the level; the **Arts panel (J)** lists your element's arts with
+quest progress, the master's whereabouts hint and a **Track** button that drives a compass under the zone name. Quest
+points are marked by stone cairns. A learned art goes in the new **Art slot (T)**; you can equip one at a time.
+Everything lives in `data/arts.json` and runs in the shared sim (server-authoritative online).
+
+| Art | Master and quest | What it does in game |
+|---|---|---|
+| Healing | Mother Senna, west of the Lantern Monastery: visit 3 spirit springs | 3 s circle that follows you, heals allies 11 per 0.5 s and cleanses burn; half healing within 8 s of PvP |
+| Lightning | Old Kazan, Storm Peak: defeat 3 enemies, meditate 10 s on the summit | Roots you for a 1.5 s charge, then an instant 45 m line strike (80 damage). Walls stop it. A firebender who knows Lightning and perfect-blocks it sends it back |
+| Metalbending | Forgemaster Ruk, Ironhollow: touch 3 ore veins | Metal cable: pulls a hit enemy to you (harder if shielded/armored); hitting ground zips you there |
+| Lavabending | Ashmother Vey, Ember Crater: 5 kills in contested land, meditate 15 s in the crater | Lava pool where you aim (burn + damage for 8 s), then a rock wall for 10 s that blocks projectiles and lightning |
+| Combustion | The Third Eye, the southern summit: 8 kills, walk all three shrines | 1 s glowing wind-up, then a 70 m explosive shot. The world-boss scroll arrives with Phase 10 |
+| Glider | none: automatic for airbenders at level 10 | Jump in the air to open/close; glides at 8.5 m/s, falling 3.2 m/s; a hit closes it |
+| Flight | Abbot Wen, Windspire: stand on 3 summits | 12 s stamina bar (T again lands); jump climbs, sprint dives; no attacks while flying; drains 2× in combat |
+| Bloodbending | The Pale Lady, far southern hills: talk at night, 3 kills at night, return at night | Night only: seize one enemy within 10 m, root and drag them for 2 s (stronger at full moon). Order players lose a faction rank and get a bounty; Hollow Moon is exempt |
+| Spirit Projection | The Wanderer, Heart Hill: meditate 20 s at each of the 3 shrines | 15 s: body stays still and takes 50% more damage, a spirit camera roams up to 90 m and marks every enemy in range; T again returns |
+
+Not built yet: Lavabending stepping stones, metal-only targeting (needs armor/base parts from Phase 9) and the
+Combustion scroll drop (Phase 10). Faction rank exists as a number on the character (default 1) until Phase 11 gives
+it meaning.
 
 ## 9. Teams
 

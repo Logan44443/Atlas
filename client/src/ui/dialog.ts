@@ -1,13 +1,15 @@
 import { NPC_CFG, factionById } from '@shared/factions';
 import type { SimEntity } from '@shared/sim/combatSim';
 
-const ROLE_LABEL: Record<string, string> = { vendor: 'Vendor', trainer: 'Trainer', quest: 'Quests', guard: 'Guard', fighter: 'Patrol' };
+const ROLE_LABEL: Record<string, string> = { vendor: 'Vendor', trainer: 'Trainer', quest: 'Quests', guard: 'Guard', fighter: 'Patrol', master: 'Master' };
 
 /** "G to talk" prompt and a simple NPC speech box. */
 export class NpcDialog {
   private hint = document.createElement('div');
   private box = document.createElement('div');
   private open: SimEntity | null = null;
+  /** Called when the player opens a conversation with a master (quests). */
+  onTalk: ((e: SimEntity) => void) | null = null;
 
   constructor() {
     this.hint.className = 'interact-hint hidden';
@@ -46,12 +48,22 @@ export class NpcDialog {
 
   private show(e: SimEntity): void {
     this.open = e;
-    const lines = (NPC_CFG.lines as Record<string, string[]>)[e.role ?? ''] ?? ['…'];
+    const master = e.role === 'master';
+    const lines = master ? ['…'] : (NPC_CFG.lines as Record<string, string[]>)[e.role ?? ''] ?? ['…'];
     const f = factionById(e.faction);
-    this.box.style.setProperty('--fc', f?.color ?? '');
-    this.box.innerHTML = `<span class="who">${e.name}</span><span class="role">${e.title ?? ''} · ${ROLE_LABEL[e.role ?? ''] ?? ''} · ${f?.name ?? ''}</span>
+    this.box.style.setProperty('--fc', master ? '#ffb35a' : f?.color ?? '');
+    const sub = [e.title, ROLE_LABEL[e.role ?? ''], f?.name].filter(Boolean).join(' · ');
+    this.box.innerHTML = `<span class="who">${e.name}</span><span class="role">${sub}</span>
       <p>${lines[Math.floor(Math.random() * lines.length)]}</p><div class="close-hint">Walk away or press interact again to close</div>`;
+    if (master) this.onTalk?.(e);
     this.box.classList.remove('hidden');
+  }
+
+  /** A master's answer arrived (from the shard or the offline host). */
+  say(npcId: string, line: string): void {
+    if (this.open?.id !== npcId) return;
+    const p = this.box.querySelector('p');
+    if (p) p.textContent = line;
   }
 
   close(): void {

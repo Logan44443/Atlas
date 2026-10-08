@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import characterData from '@data/character.json';
 import controlsData from '@data/controls.json';
 import worldData from '@data/world.json';
+import artsData from '@data/arts.json';
 import { RAPIER, type Physics } from './physics';
 import type { Controls } from '../engine/settings';
 import type { AvatarPose } from './avatar';
@@ -35,6 +36,14 @@ export class Player {
   moveScale = 1;
   rooted = false;
   staggered = false;
+  // Special Arts movement (Phase 8).
+  /** Glider learned: jump in the air opens it. */
+  canGlide = false;
+  gliding = false;
+  /** Seconds of flight left. */
+  private flyT = 0;
+  /** Spirit projection: the body stays put. */
+  frozen = false;
   private dashT = 0;
   private dashVel = new THREE.Vector3();
   private faceYaw: number | null = null;
@@ -66,6 +75,20 @@ export class Player {
     this.renderPos.set(spawn.x, spawn.y, spawn.z);
   }
 
+  /** Flight art: fly freely for `seconds` (0 lands). */
+  fly(seconds: number): void {
+    this.flyT = seconds;
+    if (seconds > 0) this.gliding = false;
+  }
+
+  get flying(): boolean {
+    return this.flyT > 0;
+  }
+
+  get flightLeft(): number {
+    return this.flyT;
+  }
+
   /** Ability movement: dash `distance` along `dir` over `duration`, optionally launching upward. */
   dash(dir: THREE.Vector3, distance: number, duration: number, lift = 0): void {
     this.dashT = duration;
@@ -84,6 +107,7 @@ export class Player {
     this.velocity.z += impulse.z;
     this.velocity.y = Math.max(this.velocity.y, impulse.y);
     if (impulse.y > 0) this.grounded = false;
+    this.gliding = false;
   }
 
   /** Turn to face `yaw` for a moment (casting toward the aim point). */
@@ -114,7 +138,11 @@ export class Player {
 
   update(frameDt: number, cameraYaw: number): void {
     // Edge-triggered inputs are sampled once per frame and consumed by the next step.
-    if (this.controls.pressed('jump')) this.jumpBuffer = C.jumpBuffer;
+    if (this.controls.pressed('jump')) {
+      // In the air with a glider: jump opens or closes it instead.
+      if (this.canGlide && !this.grounded && this.coyote <= 0 && !this.swimming && !this.flying) this.gliding = !this.gliding;
+      else this.jumpBuffer = C.jumpBuffer;
+    }
     const dodgePressed =
       this.controls.pressed('dodge') ||
       (['moveForward', 'moveBack', 'moveLeft', 'moveRight'] as const).some((a) => this.controls.doubleTapped(a, controlsData.doubleTapDodgeSeconds));
@@ -143,7 +171,7 @@ export class Player {
   }
 
   private tryDodge(cameraYaw: number): void {
-    if (this.dodgeCd > 0 || this.isDodging || this.swimming || this.rooted || this.staggered) return;
+    if (this.dodgeCd > 0 || this.isDodging || this.swimming || this.rooted || this.staggered || this.frozen) return;
     const dir = this.moveInput(cameraYaw);
     if (dir.lengthSq() === 0) dir.set(Math.sin(this.facing), 0, Math.cos(this.facing)).negate(); // backstep
     this.dodgeDir.copy(dir);
@@ -163,9 +191,11 @@ export class Player {
     let speed = this.swimming ? C.swim.speed : sprint ? C.runSpeed : C.walkSpeed;
     if (this.blocking) speed *= 0.35;
     speed *= this.moveScale;
-    if (this.rooted || this.staggered) speed = 0;
+    if (this.rooted || this.staggered || this.frozen) speed = 0;
+    if (this.flying) speed = artsData.flight.speed * this.moveScale;
+    else if (this.gliding) speed = artsData.glider.speed * this.moveScale;
     const target = input.clone().multiplyScalar(speed);
-    const accel = C.acceleration * (this.grounded || this.swimming ? 1 : C.airControl);
+    const accel = C.acceleration * (this.grounded || this.swimming || this.flying || this.gliding ? 1 : C.airControl);
     const hv = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
     const dv = target.sub(hv);
     const maxDv = accel * dt;
@@ -191,7 +221,14 @@ export class Player {
     // Vertical.
     this.coyote = this.grounded ? C.coyoteTime : Math.max(0, this.coyote - dt);
     this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
-    if (this.swimming) {
+    if (this.grounded || this.swimming) this.gliding = false;
+    if (this.flying) {
+      // Flight: no gravity; jump climbs, sprint dives.
+      this.flyT = Math.max(0, this.flyT - dt);
+      const climb = artsData.flight.climb;
+      this.velocity.y = this.controls.down('jump') ? climb : this.controls.down('sprint') ? -climb : 0;
+      this.jumpBuffer = 0;
+    } else if (this.swimming) {
       // Float with the head above the surface; jump to hop out onto a shore.
       const targetFeet = worldData.seaLevel - C.swim.depth;
       this.velocity.y = (targetFeet - feetY) * 6;
@@ -200,13 +237,14 @@ export class Player {
         this.jumpBuffer = 0;
       }
     } else {
-      if (this.jumpBuffer > 0 && this.coyote > 0 && !this.isDodging && !this.rooted && !this.staggered) {
+      if (this.jumpBuffer > 0 && this.coyote > 0 && !this.isDodging && !this.rooted && !this.staggered && !this.frozen) {
         this.velocity.y = C.jumpVelocity;
         this.jumpBuffer = 0;
         this.coyote = 0;
         this.grounded = false;
       }
       this.velocity.y = Math.max(this.velocity.y + C.gravity * dt, -C.maxFallSpeed);
+      if (this.gliding) this.velocity.y = Math.max(this.velocity.y, -artsData.glider.fallSpeed);
       if (this.grounded && this.velocity.y < 0) this.velocity.y = -2;
     }
 
@@ -250,7 +288,7 @@ export class Player {
       grounded: this.grounded,
       vy: this.velocity.y,
       dodge: this.dodgeProgress,
-      swimming: this.swimming,
+      swimming: this.swimming || this.flying || this.gliding,
       blocking: this.blocking,
     };
   }

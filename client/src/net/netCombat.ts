@@ -4,7 +4,7 @@ import type { ElementId, Slot, StatusType } from '@shared/combat';
 import { createEntity, setMods, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import { NET, ROOM_NAME, type CorrectMsg, type InviteMsg, type JoinOptions, type MoveMsg, type PartyInfo, type V3, type WelcomeMsg, type XpMsg } from '@shared/net';
 import { computeMods, newProgress, type Progress } from '@shared/progression';
-import { createPlayerEntity, PLAYER_SHAPE, type CombatHost, type XpGain } from '../game/combat/host';
+import { applyArtsToEntity, createPlayerEntity, PLAYER_SHAPE, type CombatHost, type QuestLine, type XpGain } from '../game/combat/host';
 import { sideOf } from '@shared/factions';
 
 /** What the client reads from a replicated entity (see server/schema.ts). */
@@ -96,6 +96,7 @@ export class NetCombat implements CombatHost {
   readonly xpLog: XpGain[] = [];
   party: PartyInfo | null = null;
   readonly invites: InviteMsg[] = [];
+  readonly questLines: QuestLine[] = [];
 
   private constructor(
     readonly room: Room<WorldStateView>,
@@ -124,6 +125,7 @@ export class NetCombat implements CombatHost {
       this.me.party = p?.id ?? '';
     });
     room.onMessage('invite', (m: InviteMsg) => this.invites.push(m));
+    room.onMessage('quest', (m: QuestLine) => this.questLines.push(m));
     room.onMessage('pong', (m: { t: number; s: number }) => {
       const now = Date.now();
       this.rtt = now - m.t;
@@ -191,6 +193,21 @@ export class NetCombat implements CombatHost {
     this.progress = p;
     this.me.level = p.level;
     setMods(this.me, computeMods(this.me.element, p.mastery));
+    applyArtsToEntity(this.me, p);
+  }
+
+  talkTo(npcId: string): void {
+    if (!this.closed) this.room.send('quest:talk', npcId);
+  }
+  equipArt(id: string | null): void {
+    if (!this.closed) this.room.send('art:equip', id);
+  }
+  /** Dev shards only: XP and clock shifts for tests. */
+  devXp(amount: number): void {
+    if (!this.closed) this.room.send('dev:xp', amount);
+  }
+  devClock(hours: number): void {
+    if (!this.closed) this.room.send('dev:clock', hours);
   }
 
   setMastery(alloc: Record<string, number>): void {

@@ -23,7 +23,11 @@ This file covers architecture, layout, conventions and the current phase. Update
   each, 3-branch mastery tree per element (1 point per level, tiered unlocks, free respec until gold exists),
   crits/armor/chi-regen modifiers, parties of 4 with shared XP within 50 m, anti-griefing XP rules, 6 party combos
   such as Water + Fire steam that blinds). Verified with `scripts/progression-check.ts` and `scripts/phase7-test.mjs`.
-- **Phase 8 Special Arts**: next.
+- **Phase 8 Special Arts**: done (9 arts from `data/arts.json`: Healing, Lightning with redirect, Metal cable,
+  Lava pool -> rock wall, Combustion, Glider, Flight, night-only Bloodbending with faction penalty, Spirit
+  Projection; master NPCs with camps, step quests (talk/visit/kill/meditate), Arts panel `J` with quest compass,
+  Art slot `T`). Verified with `scripts/phase8-test.mjs`.
+- **Phase 9 Building**: next.
 - README.md is owned by a separate thread: don't edit it from build threads.
 
 ## Run it
@@ -43,6 +47,7 @@ node scripts/net-test.mjs          # two browsers on one shard: see each other, 
 node scripts/phase6-test.mjs       # title screen, hub spawn, NPC talk, safe vs contested PvP, patrols, saved position
 npx tsx scripts/progression-check.ts   # XP/mastery/combo rules without a browser
 node scripts/phase7-test.mjs       # party invite, steam combo, shared XP, discovery level-up, mastery panel, saves
+node scripts/phase8-test.mjs       # Healing quest online, night-only Bloodbending, every other art offline
 ```
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
@@ -72,7 +77,7 @@ client/              Vite root (index.html, src/, public/)
   src/net/           NetCombat: Colyseus client, entity mirror + interpolation, move/cast messages
   src/net/account.ts AccountClient: guest/register/login, character list (offline: localStorage roster)
   src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog,
-                     progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), CSS
+                     progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), artsUi (arts panel + quest compass), CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -86,6 +91,7 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   sim/npcs.ts        faction NPC members (vendors, trainers, envoys, guards, patrols)
   factions.ts        factions, sides, zones (zoneAt), PvP numbers, hub flats -> terrainConfig(), hubSpawn
   names.ts           name/username/password validation shared by client and server
+  arts.ts            Special Arts list, ArtsState, QuestRules (talk/visit/kill/meditate), quest status/compass target
   progression.ts     XP curve, kill/discovery rewards (XpRules), mastery validation, Mods + modKit()
   clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
   net.ts             wire protocol types (move/cast/welcome/correct/events)
@@ -109,6 +115,7 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   progression.json   XP curve, kill/discovery XP, level factor, PvP repeat rules, party size/share radius
   mastery.json       mastery trees (3 branches x 5 skills per element) and tier unlocks
   partyCombos.json   party combo pairs (steam, magma, firestorm, blizzard, mud, sandstorm)
+  arts.json          Special Arts: level, master + camp spot, quest steps, the art's ability, glider/flight tuning
 scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
 docs/DESIGN.md       game design (keep in sync)
 ```
@@ -159,6 +166,13 @@ docs/DESIGN.md       game design (keep in sync)
   prediction uses the same numbers. Offline characters save progress to localStorage.
 - **Parties/combos**: `entity.party` is set by the room. `CombatSim.comboCheck` marks each party hit on a target;
   a different element from another member within the window spawns the pair's combo area (`combo` event).
+- **Special Arts**: `Progress.arts` (learned, equipped, quests, bounty) is owned by the authority like XP.
+  `QuestRules` runs `talk` (client sends `quest:talk`, server checks the master is within 8 m), `onKill`, and a 1 s
+  `tick` for visit/meditate (meditate needs the player to stand still). The equipped art is `entity.art`, appended
+  to the kit by `kitOf` as slot `art`. New ability kinds in the sim: `heal`, `beam` (lightning), `pool` (lava ->
+  `Wall`), `grab` (blood), `flight`, `spirit`; `grapple` projectiles. Flight/spirit are toggles: recasting ends them
+  and the sim announces the end (`fly`/`spirit` with duration 0). The client runs the movement side (`Player.fly`,
+  glider, `frozen` during spirit). Dev shards accept `dev:xp` and `dev:clock` (shift the shard clock in hours).
 - **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
   are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
 

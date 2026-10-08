@@ -4,7 +4,7 @@ import { keyLabel, type Settings } from '../engine/settings';
 import type { PlayerAbilities } from '../game/combat/abilities';
 import { center, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 
-const SLOT_ACTION: Record<Slot, string> = { basic: 'basic', heavy: 'heavy', control: 'control', defense: 'defense', mobility: 'mobility', ultimate: 'ultimate' };
+const SLOT_ACTION: Record<Slot, string> = { basic: 'basic', heavy: 'heavy', control: 'control', defense: 'defense', mobility: 'mobility', ultimate: 'ultimate', art: 'art' };
 const ELEMENT_ICON: Record<string, string> = { fire: '🔥', water: '💧', earth: '⛰️', air: '🌀' };
 
 interface Floater {
@@ -90,6 +90,10 @@ export class Hud {
       target = entities.get(e.target);
       text = { stagger: 'Staggered', root: 'Rooted', slow: 'Slowed', blind: 'Blinded' }[e.status];
       cls = 'info';
+    } else if (e.t === 'heal' && e.amount > 0) {
+      target = entities.get(e.target);
+      text = `+${e.amount}`;
+      cls = 'heal';
     } else if (e.t === 'level') {
       target = entities.get(e.target);
       text = `Level ${e.level}!`;

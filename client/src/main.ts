@@ -44,12 +44,15 @@ import { ChunkMinimap } from './ui/minimap';
 import { SettingsMenu } from './ui/settingsMenu';
 import { XpHud, MasteryPanel, PartyUi } from './ui/progressUi';
 import { PROG, type Progress } from '@shared/progression';
+import { ArtsPanel } from './ui/artsUi';
+import { artById } from '@shared/arts';
 
 const HELP = `Click to capture mouse, Esc for settings
 WASD move, Shift sprint, Space jump, V dodge
 LMB basic, Q E R F X abilities, Tab target
 Hold right mouse: block (time it to counter)
-K mastery  I invite to party  G talk  P PvP flag
+T special art  J arts & quests  K mastery
+I invite to party  G talk  P PvP flag
 F2 free camera  F3 overlay  F4/M chunk map`;
 
 function setLoading(text: string, frac: number) {
@@ -157,7 +160,10 @@ async function main() {
   let netStatus = account.online ? 'connecting…' : 'offline (no server)';
   let host: CombatHost;
   let start: THREE.Vector3;
-  const savedProgress: Partial<Progress> = { level: character.level, xp: character.xp ?? 0, mastery: character.mastery ?? {}, discovered: character.discovered ?? [] };
+  const savedProgress = {
+    level: character.level, xp: character.xp ?? 0, mastery: character.mastery ?? {}, discovered: character.discovered ?? [],
+    arts: character.arts as Progress['arts'] | undefined, rank: character.rank ?? 1,
+  } as Partial<Progress>;
   const makeLocal = (at: THREE.Vector3, progress: Partial<Progress> = savedProgress) => {
     const lc = new LocalCombat(who.name, who.element, spawn, groundAt, progress);
     lc.me.faction = who.faction;
@@ -224,6 +230,47 @@ async function main() {
   document.body.appendChild(blindFog);
   const zoneHud = new ZoneHud();
   const dialog = new NpcDialog();
+  dialog.onTalk = (e) => host.talkTo(e.id);
+  const artsPanel = new ArtsPanel(() => host, () => updateHint(), () => keyOf('art'));
+  // Spirit projection: the body stays put, a free camera roams within range and enemies are revealed.
+  const spirit = { t: 0, range: 0, origin: new THREE.Vector3() };
+  const spiritVeil = document.createElement('div');
+  spiritVeil.className = 'spirit-veil';
+  const flightBar = document.createElement('div');
+  flightBar.className = 'flight-bar hidden';
+  flightBar.innerHTML = '<div class="fill"></div>';
+  const revealLayer = document.createElement('div');
+  revealLayer.className = 'reveal-layer';
+  document.body.append(spiritVeil, flightBar, revealLayer);
+  let flightTotal = 1;
+  const canGlide = () => {
+    const g = artById('glider');
+    return host.progress.arts.learned.includes('glider') || (!!g && host.me.element === g.element && host.progress.level >= g.level);
+  };
+  function endSpirit() {
+    if (spirit.t <= 0) return;
+    spirit.t = 0;
+    player.frozen = false;
+    spiritVeil.classList.remove('on');
+    revealLayer.replaceChildren();
+  }
+  const revealPos = new THREE.Vector3();
+  function updateReveal() {
+    revealLayer.replaceChildren();
+    if (spirit.t <= 0) return;
+    for (const e of host.entities.values()) {
+      if (e.dead || e === host.me || e.kind === 'dummy' || e.role === 'master') continue;
+      if (e.pos.distanceTo(spirit.origin) > spirit.range) continue;
+      revealPos.copy(e.pos).setY(e.pos.y + 2.4).project(camera);
+      if (revealPos.z > 1) continue;
+      const m = document.createElement('div');
+      m.className = 'reveal';
+      m.style.left = `${((revealPos.x + 1) / 2) * innerWidth}px`;
+      m.style.top = `${((1 - revealPos.y) / 2) * innerHeight}px`;
+      m.textContent = e.kind === 'player' ? `◆ ${e.name}` : '◆';
+      revealLayer.appendChild(m);
+    }
+  }
   function togglePvp() {
     const me = host.me;
     if (host instanceof NetCombat) host.setPvp(!me.pvp);
@@ -287,6 +334,28 @@ async function main() {
       case 'castFail':
         if (e.caster === me.id) abilities.onCastFail(e.slot, e.reason);
         break;
+      case 'fly':
+        if (e.target === me.id) {
+          player.fly(e.duration);
+          if (e.duration > 0) flightTotal = e.duration;
+        }
+        break;
+      case 'spirit':
+        if (e.target !== me.id) break;
+        if (e.duration > 0) {
+          spirit.t = e.duration;
+          spirit.range = e.range;
+          spirit.origin.copy(player.renderPos);
+          player.frozen = true;
+          fly.yaw = tpc.yaw;
+          fly.pitch = tpc.pitch;
+          spiritVeil.classList.add('on');
+        } else endSpirit();
+        break;
+      case 'hit':
+        // Taking a real hit closes the glider.
+        if (e.target === me.id && e.result === 'hit' && e.amount > 0) player.gliding = false;
+        break;
       case 'dash':
         if (e.owner === me.id) player.dash(new THREE.Vector3(...e.dir), e.distance, e.duration, e.lift);
         break;
@@ -320,7 +389,7 @@ async function main() {
       const p = host.progress;
       account.saveLocalCharacter(character.id, {
         pos: [player.renderPos.x, player.renderPos.y, player.renderPos.z], name: settings.data.name,
-        level: p.level, xp: p.xp, mastery: p.mastery, discovered: p.discovered,
+        level: p.level, xp: p.xp, mastery: p.mastery, discovered: p.discovered, arts: p.arts, rank: p.rank,
       });
     }
   };
@@ -374,7 +443,7 @@ async function main() {
   crosshair.className = 'crosshair hidden';
   document.body.appendChild(crosshair);
   function updateHint() {
-    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || freeCam);
+    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || freeCam);
     crosshair.classList.toggle('hidden', !input.pointerLocked);
   }
   gr.renderer.domElement.addEventListener('click', () => {
@@ -388,7 +457,7 @@ async function main() {
   Object.assign(window, {
     __fw: {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
-      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal,
+      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal, artsPanel, spirit,
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -423,10 +492,19 @@ async function main() {
 
     if (!loading) {
       const me = host.me;
-      if (freeCam) fly.update(dt);
-      else if (!me.dead) player.update(dt, tpc.yaw);
+      player.canGlide = canGlide();
+      if (spirit.t > 0) {
+        spirit.t -= dt;
+        fly.update(dt);
+        // The spirit can't wander past its range from the body.
+        const off = camera.position.clone().sub(spirit.origin);
+        if (off.length() > spirit.range) camera.position.copy(spirit.origin).add(off.setLength(spirit.range));
+        if (spirit.t <= -1 || me.dead) endSpirit();
+      }
+      if (freeCam && spirit.t <= 0) fly.update(dt);
+      if (!me.dead) player.update(dt, tpc.yaw);
       syncMe();
-      if (!freeCam && !mastery.isOpen) abilities.update(dt, me.blocking);
+      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen) abilities.update(dt, me.blocking);
       for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
       if (host instanceof NetCombat) {
         for (const c of host.corrections.splice(0)) {
@@ -441,6 +519,12 @@ async function main() {
       for (const g of host.xpLog.splice(0)) xpHud.gain(g, host.progress);
       xpHud.update(dt, host.progress);
       if (controls.pressed('mastery')) mastery.toggle();
+      if (controls.pressed('artsPanel')) artsPanel.toggle();
+      artsPanel.update(camera, player.renderPos.x, player.renderPos.z);
+      for (const l of host.questLines.splice(0)) dialog.say(l.npc, l.line);
+      updateReveal();
+      flightBar.classList.toggle('hidden', !player.flying);
+      if (player.flying) (flightBar.firstElementChild as HTMLElement).style.width = `${Math.min(100, (player.flightLeft / flightTotal) * 100)}%`;
       mastery.update();
       if (controls.pressed('partyInvite') && !partyUi.inviteLookedAt(camera)) zoneHud.show(`Look at a player within ${PROG.party.inviteRange} m to invite them`, true);
       if (partyUi.pendingInvite && controls.pressed('acceptInvite')) partyUi.answer(true);
@@ -462,12 +546,12 @@ async function main() {
       avatar.update(dt, { ...player.pose(), cast: fb.gesture, castStyle: fb.style });
       avatar.root.rotation.z = me.dead ? Math.PI / 2 : 0;
       hud.update(dt, camera, host.me, abilities, abilities.target);
-      if (!freeCam) tpc.update(dt, player);
+      if (!freeCam && spirit.t <= 0) tpc.update(dt, player);
     } else {
       tpc.update(0, player);
     }
 
-    const focus = freeCam ? camera.position : player.renderPos;
+    const focus = freeCam || spirit.t > 0 ? camera.position : player.renderPos;
     streamer.update(focus, dt);
     dayNight.update(dt, focus, q.shadowDistance);
     dayNight.light.castShadow = q.shadows;

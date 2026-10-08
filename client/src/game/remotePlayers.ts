@@ -12,7 +12,7 @@ const DRAW_DISTANCE = netData.interestAddChunks * worldData.chunkSize;
 
 /** Nameplate text + colour: NPCs show their title in faction colours, party members are green, PvP-flagged players red. */
 function plateFor(e: SimEntity, inParty: boolean): { text: string; color: string } {
-  if (e.kind === 'npc') return { text: `${e.name} · ${e.title ?? ''}`, color: factionById(e.faction)?.color ?? '#ffe6a0' };
+  if (e.kind === 'npc') return { text: `${e.name} · ${e.title ?? ''}`, color: e.role === 'master' ? '#ffb35a' : factionById(e.faction)?.color ?? '#ffe6a0' };
   const lv = `Lv ${e.level} ${e.name}`;
   if (inParty) return { text: lv, color: '#8dff9a' };
   return { text: lv, color: e.pvp ? '#ff9a7a' : '#ffffff' };

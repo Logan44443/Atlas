@@ -153,7 +153,7 @@ export class PlayerAbilities {
     if (this.targetLockT <= 0) this.target = a.target;
 
     if (this.me().dead || blockingHeld) return;
-    const order: Slot[] = ['ultimate', 'mobility', 'defense', 'control', 'heavy', 'basic'];
+    const order: Slot[] = ['art', 'ultimate', 'mobility', 'defense', 'control', 'heavy', 'basic'];
     for (const slot of order) {
       const want = slot === 'basic' ? this.controls.down('basic') : this.controls.pressed(slot);
       if (want && this.tryCast(slot)) break;
@@ -163,6 +163,12 @@ export class PlayerAbilities {
   tryCast(slot: Slot): boolean {
     const def = this.kit.abilities.find((a) => a.slot === slot);
     if (!def) return false;
+    // Flight and Spirit Projection end early when cast again.
+    const toggleOff = (def.kind === 'flight' && this.player.flying) || (def.kind === 'spirit' && this.player.frozen);
+    if (toggleOff) {
+      this.sink(slot, this.aimDir.clone());
+      return true;
+    }
     if ((this.cooldowns.get(slot) ?? 0) > 0) return false;
     const me = this.me();
     if (me.statuses.has('stagger')) return this.fail('Staggered');
