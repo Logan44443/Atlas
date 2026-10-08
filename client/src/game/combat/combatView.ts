@@ -11,6 +11,8 @@ const LAVA_PALETTE = paletteOf('#ff5a1a', true);
 const LIGHTNING_PALETTE = paletteOf('#a8d8ff', true);
 const BLOOD_PALETTE = paletteOf('#c0102a', true);
 const SPIRIT_PALETTE = paletteOf('#9fe8ff', true);
+const CRAFT_PALETTE = paletteOf('#ffe9a8', true);
+const DEBRIS_PALETTE = paletteOf('#8a7a66');
 /** Art abilities with their own look (by ability id). */
 const ART_PALETTES: Record<string, Palette> = { healing: HEAL_PALETTE, lava: LAVA_PALETTE, lightning: LIGHTNING_PALETTE, blood: BLOOD_PALETTE, spirit: SPIRIT_PALETTE, combustion: paletteOf('#ffb347', true), metal: paletteOf('#c8ccd4') };
 const COMBO_PALETTES = new Map(COMBOS.map((c) => [c.id, { pal: paletteOf(c.color, c.elements.includes('fire')), soft: !c.elements.includes('fire') }]));
@@ -237,6 +239,18 @@ export class CombatView {
         this.combos.push({ id: ev.combo, pos, radius: ev.radius, remaining: ev.duration });
         const c = COMBO_PALETTES.get(ev.combo);
         if (c) this.vfx.burst(c.pal, tmp.copy(pos).setY(pos.y + 1), 50, 9, 1.2, 0.8);
+        break;
+      }
+      case 'craft': {
+        // Bend-crafting: a swirl of light where the material forms.
+        const pos = v3(ev.pos);
+        this.vfx.swirl(CRAFT_PALETTE, pos, 0.8, 1.2, 40, 0);
+        this.vfx.burst(CRAFT_PALETTE, pos, 40, 4, 0.5, 0.9);
+        break;
+      }
+      case 'struct': {
+        const pos = v3(ev.pos);
+        this.vfx.burst(DEBRIS_PALETTE, pos, ev.broke ? 90 : 18, ev.broke ? 7 : 4, ev.broke ? 0.7 : 0.4, ev.broke ? 1.2 : 0.6);
         break;
       }
       case 'level': {

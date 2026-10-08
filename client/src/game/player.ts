@@ -215,6 +215,11 @@ export class Player {
       hv.copy(this.dashVel);
       if (this.dashT <= 0) hv.multiplyScalar(0.35);
     }
+    // The body left behind by spirit projection drops straight down: no drift, no glider.
+    if (this.frozen) {
+      hv.set(0, 0, 0);
+      this.gliding = false;
+    }
     this.velocity.x = hv.x;
     this.velocity.z = hv.z;
 

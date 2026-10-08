@@ -7,6 +7,7 @@ import type { AbilityDef, ElementId, ElementKit, Slot } from './combat';
 import { SLOTS } from './combat';
 import { FACTIONS, CONTESTED, PVP, zoneAt } from './factions';
 import { newArtsState, type ArtsState } from './arts';
+import type { Inventory } from './building';
 import type { SimEntity } from './sim/combatSim';
 
 export const PROG = progressionData;
@@ -28,10 +29,14 @@ export interface Progress {
   arts: ArtsState;
   /** faction rank 1-10 */
   rank: number;
+  /** materials carried (Phase 9) */
+  inv: Inventory;
+  /** one-time building XP milestones reached */
+  milestones: string[];
 }
 
 export function newProgress(p: Partial<Progress> = {}): Progress {
-  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, ...p };
+  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, inv: {}, milestones: [], ...p };
 }
 
 /** Adds XP (levelling up as needed) and returns how many levels were gained. */

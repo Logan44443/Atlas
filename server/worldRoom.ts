@@ -23,6 +23,10 @@ import { validateName } from '../shared/names';
 import accountData from '../data/accounts.json';
 import timeData from '../data/time.json';
 import type { Account, CharacterRow, Store } from './db/store';
+import { camps, onlineChars } from './camps';
+import { BUILD, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory, type Structure } from '../shared/building';
+import { CraftRules, type Crafter, type Crafted } from '../shared/crafting';
+import { campRespawn, milestoneXp, shrineBonus, ventTick } from '../shared/campRules';
 
 interface AuthResult {
   account: Account;
@@ -60,7 +64,13 @@ interface PlayerData {
   /** seconds standing still (meditation) */
   still: number;
   stillFrom: Vector3;
+  /** structures this client has been sent */
+  knownStructs: Set<string>;
+  raidNoticeT: number;
 }
+
+/** Structures within this many metres are streamed to a client. */
+const STRUCT_RADIUS = 320;
 
 export function cleanName(raw: unknown): string {
   const s = String(raw ?? '').replace(/[^\p{L}\p{N} _'-]/gu, '').trim().slice(0, characterData.nameMaxLength);
@@ -84,6 +94,9 @@ export class WorldRoom extends Room<WorldState> {
   private slowT = 0;
   /** dev builds: shift this shard's world clock (tests for night-only arts) */
   private clockShiftMs = 0;
+  private crafts = new CraftRules();
+  private unlisten: (() => void) | null = null;
+  private ventT = 0;
 
   onCreate(): void {
     const state = new WorldState();
@@ -94,6 +107,10 @@ export class WorldRoom extends Room<WorldState> {
     this.brains = spawnDummies(this.sim, this.spawn, groundAt);
     this.npcs = [...spawnNpcs(this.sim, groundAt), ...spawnMasters(this.sim, groundAt)];
     for (const e of this.sim.entities.values()) this.state.entities.set(e.id, this.newState(e));
+    // Camps are shared by every shard in the process.
+    this.sim.solids = camps.solids;
+    this.unlisten = camps.listen((st, change) => this.onStructChange(st, change));
+    this.onBuildMessages();
 
     this.onMessage('move', (c, m: MoveMsg) => this.onMove(c, m));
     this.onMessage('cast', (c, m: CastMsg) => this.onCast(c, m));
@@ -126,6 +143,20 @@ export class WorldRoom extends Room<WorldState> {
       // Tests: grant XP, shift the shard clock by hours.
       this.onMessage('dev:xp', (c, amount: number) => {
         if (Number.isFinite(amount) && amount > 0) this.grant({ id: c.sessionId, amount: Math.min(1e7, amount), reason: 'dev' });
+      });
+      this.onMessage('dev:raid', (_c, on: boolean | null) => {
+        camps.forceRaid = on === null ? null : !!on;
+      });
+      // Tests clean up after themselves: drop your whole camp.
+      this.onMessage('dev:clearCamp', (c) => {
+        const p = this.players.get(c.sessionId);
+        if (p) for (const st of camps.ofOwner(p.characterId)) camps.delete(st.id);
+      });
+      this.onMessage('dev:give', (c, items: Inventory) => {
+        const p = this.players.get(c.sessionId);
+        if (!p) return;
+        giveItems(p.progress.inv, sanitizeInv(items, 1e6));
+        c.send('progress', p.progress);
       });
       this.onMessage('dev:clock', (_c, hours: number) => {
         if (Number.isFinite(hours)) this.clockShiftMs = hours * (timeData.dayLengthMinutes * 60_000) / 24;
@@ -237,7 +268,10 @@ export class WorldRoom extends Room<WorldState> {
       pos = new Vector3(sp.x, 0, sp.z);
     }
     pos.y = Math.max(groundAt(pos.x, pos.z), worldData.seaLevel);
-    const progress = newProgress({ level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])], rank: c.rank, arts: sanitizeArts(c.element, c.arts) });
+    const progress = newProgress({
+      level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])], rank: c.rank, arts: sanitizeArts(c.element, c.arts),
+      inv: sanitizeInv(c.inv), milestones: Array.isArray(c.milestones) ? c.milestones.map(String) : [],
+    });
     progress.mastery = sanitizeAlloc(c.element, progress.level, c.mastery);
     const entity = createEntity({
       id: client.sessionId, name: c.name, kind: 'player', team: 'players', element: c.element, pos, level: c.level,
@@ -252,13 +286,17 @@ export class WorldRoom extends Room<WorldState> {
     this.players.set(client.sessionId, {
       entity, last: pos.clone(), lastT: Date.now(), allowance: 0, lastDodge: -1e9, invSince: -1, swimming: false, aim: new Vector3(0, 0, 1), seq: 0, deadT: 0,
       characterId: c.id, pvpToggleT: -1e9, progress, respawnedAt: this.sim.time, still: 0, stillFrom: pos.clone(),
+      knownStructs: new Set(), raidNoticeT: -1e9,
     });
+    onlineChars.add(c.id);
+    camps.touch(c.id);
     const st = this.newState(entity);
     this.state.entities.set(entity.id, st);
     client.view = new StateView();
     client.view.add(st);
     const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: this.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level, progress };
     client.send('welcome', welcome);
+    this.syncStructs(client, this.players.get(client.sessionId)!);
     console.log(`[${this.roomId}] ${entity.name} (${c.faction} ${c.element}) joined (${this.clients.length}/${this.maxClients})`);
   }
 
@@ -268,7 +306,7 @@ export class WorldRoom extends Room<WorldState> {
     return WorldRoom.store
       .saveCharacter(p.characterId, {
         pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)], level: pr.level, xp: pr.xp, mastery: pr.mastery, discovered: pr.discovered,
-        arts: pr.arts, rank: pr.rank,
+        arts: pr.arts, rank: pr.rank, inv: pr.inv, milestones: pr.milestones,
       })
       .catch((err) => console.error('[db] save failed', err));
   }
@@ -304,6 +342,8 @@ export class WorldRoom extends Room<WorldState> {
   private grant(a: XpAward): void {
     const p = this.players.get(a.id);
     if (!p) return;
+    // An element shrine at a nearby camp of your side adds a little XP.
+    if (a.amount > 0) a = { ...a, amount: Math.round(a.amount * shrineBonus(camps, p.entity)) };
     const levelUp = addXp(p.progress, a.amount);
     if (levelUp) {
       const e = p.entity;
@@ -328,6 +368,149 @@ export class WorldRoom extends Room<WorldState> {
     for (const a of this.xp.onKill(victim, killer, this.players, this.parties.membersOf(killer.entity.id), this.sim.time)) this.grant(a);
     const night = this.night();
     for (const n of this.quests.onKill(killer, victim, night)) this.applyQuestNews(killer, n);
+  }
+
+  // ---- camps and crafting (Phase 9) ------------------------------------------
+
+  private builder(p: PlayerData): Builder {
+    const e = p.entity;
+    return { charId: p.characterId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: p.progress.inv };
+  }
+
+  private crafter(p: PlayerData): Crafter {
+    return { entity: p.entity, charId: p.characterId, inv: p.progress.inv, arts: p.progress.arts.learned };
+  }
+
+  private onBuildMessages(): void {
+    const say = (c: Client, text: string, warn = false) => c.send('notice', warn ? { text, warn } : { text });
+    this.onMessage('build:place', (c, m: { piece?: string; x?: number; z?: number; rot?: number }) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || p.entity.dead || !m || !Number.isFinite(m.x) || !Number.isFinite(m.z)) return;
+      const r = camps.place(this.builder(p), { piece: String(m.piece), x: m.x!, z: m.z!, rot: Number(m.rot) || 0 });
+      if (typeof r === 'string') return say(c, r, true);
+      say(c, `Built ${pieceById(r.piece)!.name}`);
+      for (const a of milestoneXp(p.progress, camps, p.characterId, r)) this.grant({ id: p.entity.id, ...a });
+      c.send('progress', p.progress);
+    });
+    this.onMessage('build:remove', (c, id: string) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const r = camps.remove(this.builder(p), String(id));
+      if (typeof r === 'string') return say(c, r, true);
+      say(c, `Took down ${pieceById(r.piece)!.name}`);
+      c.send('progress', p.progress);
+    });
+    this.onMessage('craft:channel', (c) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const others = [...this.players.values()].filter((o) => o !== p).map((o) => this.crafter(o));
+      const r = this.crafts.channel(this.crafter(p), others, this.sim.time);
+      if (r.kind === 'waiting') return say(c, r.text);
+      if (r.kind === 'failed') return say(c, r.reason, true);
+      this.applyCraft(r.crafted);
+    });
+    this.onMessage('gather', (c, nodeId: string | null) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || p.entity.dead) return;
+      const r = this.crafts.gather(this.crafter(p), typeof nodeId === 'string' ? nodeId : null, this.sim.time);
+      if (typeof r === 'string') return say(c, r, true);
+      say(c, r.text);
+      c.send('progress', p.progress);
+    });
+    this.onMessage('forge', (c, recipe: string) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const r = this.crafts.forge(this.crafter(p), String(recipe), camps);
+      if (typeof r === 'string') return say(c, r, true);
+      say(c, r.text);
+      c.send('progress', p.progress);
+    });
+    // Chest: move items between your bag and your own chest.
+    this.onMessage('chest', (c, m: { id?: string; items?: Inventory; put?: boolean }) => {
+      const p = this.players.get(c.sessionId);
+      const chest = m?.id ? camps.all.get(String(m.id)) : undefined;
+      if (!p || !chest?.store || chest.owner !== p.characterId) return;
+      if (Math.hypot(chest.x - p.entity.pos.x, chest.z - p.entity.pos.z) > 5) return say(c, 'Get closer to the chest', true);
+      const r = moveItems(p.progress.inv, chest.store, sanitizeInv(m.items, 1e6), !!m.put);
+      if (r) say(c, r, true);
+      camps.touch(p.characterId);
+      this.onStructChange(chest, 'hp');
+      c.send('progress', p.progress);
+    });
+  }
+
+  private applyCraft(cr: Crafted): void {
+    this.sim.events.push({ t: 'craft', recipe: cr.recipe, name: cr.name, pos: cr.pos, members: cr.gains.map((g) => g.crafter.entity.id) });
+    for (const g of cr.gains) {
+      const id = g.crafter.entity.id;
+      const c = this.clientOf(id);
+      c?.send('notice', Object.keys(g.items).length ? { text: `${cr.name}: +${itemsText(g.items)}` } : { text: 'Your bag is full', warn: true });
+      this.grant({ id, amount: g.xp, reason: `bent ${cr.name}` });
+      c?.send('progress', this.players.get(id)?.progress);
+    }
+  }
+
+  /** Bending reached a structure: raid rules decide. */
+  private onStructHit(ev: Extract<SimEvent, { t: 'structHit' }>, out: SimEvent[]): void {
+    const p = this.players.get(ev.source);
+    if (!p) return;
+    const r = camps.damage(ev.id, ev.amount, { side: p.entity.side, element: p.entity.element }, this.now());
+    if (!r) return;
+    if (r.kind === 'refused') {
+      if (this.sim.time - p.raidNoticeT > 8) {
+        p.raidNoticeT = this.sim.time;
+        this.clientOf(p.entity.id)?.send('notice', { text: r.reason, warn: true });
+      }
+      return;
+    }
+    out.push({ t: 'struct', id: r.s.id, hp: r.s.hp, maxHp: r.s.maxHp, pos: [r.s.x, r.s.y + 1, r.s.z], broke: r.kind === 'broke', source: p.entity.id });
+  }
+
+  /** A structure changed somewhere in the world: tell the clients that can see it. */
+  private onStructChange(st: Structure, change: 'add' | 'hp' | 'del'): void {
+    for (const c of this.clients) {
+      const p = this.players.get(c.sessionId);
+      if (!p) continue;
+      if (change === 'del') {
+        if (p.knownStructs.delete(st.id)) c.send('structDel', [st.id]);
+        continue;
+      }
+      const near = Math.hypot(st.x - p.entity.pos.x, st.z - p.entity.pos.z) <= STRUCT_RADIUS;
+      if (!near && !p.knownStructs.has(st.id)) continue;
+      p.knownStructs.add(st.id);
+      c.send('structs', [this.structFor(st, p)]);
+    }
+  }
+
+  /** Chest contents are private to their owner. */
+  private structFor(st: Structure, p: PlayerData): Structure {
+    return st.store && st.owner !== p.characterId ? { ...st, store: undefined } : st;
+  }
+
+  /** Stream structures in and out of a client's range. */
+  private syncStructs(c: Client, p: PlayerData): void {
+    const add: Structure[] = [];
+    const del: string[] = [];
+    for (const st of camps.all.values()) {
+      const near = Math.hypot(st.x - p.entity.pos.x, st.z - p.entity.pos.z) <= STRUCT_RADIUS;
+      if (near && !p.knownStructs.has(st.id)) {
+        p.knownStructs.add(st.id);
+        add.push(this.structFor(st, p));
+      }
+    }
+    for (const id of p.knownStructs) {
+      const st = camps.all.get(id);
+      if (!st || Math.hypot(st.x - p.entity.pos.x, st.z - p.entity.pos.z) > STRUCT_RADIUS + 40) {
+        p.knownStructs.delete(id);
+        del.push(id);
+      }
+    }
+    if (add.length) c.send('structs', add);
+    if (del.length) c.send('structDel', del);
+  }
+
+  onDispose(): void {
+    this.unlisten?.();
   }
 
   // ---- parties -------------------------------------------------------------
@@ -368,6 +551,8 @@ export class WorldRoom extends Room<WorldState> {
     const p = this.players.get(client.sessionId);
     if (p) {
       online.delete(p.characterId);
+      onlineChars.delete(p.characterId);
+      camps.touch(p.characterId);
       this.leaveParty(client.sessionId, 'left');
       this.parties.decline(client.sessionId);
       await this.save(p);
@@ -459,7 +644,7 @@ export class WorldRoom extends Room<WorldState> {
         p.deadT += dt;
         if (p.deadT > 3) {
           p.deadT = 0;
-          const sp = hubSpawn(e.faction);
+          const sp = campRespawn(camps, p.characterId) ?? hubSpawn(e.faction);
           e.pos.set(sp.x, Math.max(groundAt(sp.x, sp.z), worldData.seaLevel), sp.z);
           p.last.copy(e.pos);
           this.sim.revive(e);
@@ -474,6 +659,14 @@ export class WorldRoom extends Room<WorldState> {
         const p = this.players.get(ev.owner);
         if (p) p.allowance += ev.distance + ev.lift;
       } else if (ev.t === 'death') this.onDeath(ev.target, ev.source);
+      else if (ev.t === 'structHit') this.onStructHit(ev, events);
+    }
+    // Steam vents.
+    this.ventT += dt;
+    if (this.ventT >= BUILD.vent.every) {
+      this.ventT = 0;
+      ventTick(camps, this.sim);
+      events.push(...this.sim.drain());
     }
     // Once a second: landmark discovery and party frames.
     this.slowT += dt;
@@ -488,6 +681,10 @@ export class WorldRoom extends Room<WorldState> {
         p.stillFrom.copy(p.entity.pos);
         for (const n of this.quests.tick(p, night)) this.applyQuestNews(p, n);
         if (this.parties.of(p.entity.id)) this.clientOf(p.entity.id)?.send('party', this.partyInfo(p.entity.id));
+      }
+      for (const c of this.clients) {
+        const p = this.players.get(c.sessionId);
+        if (p) this.syncStructs(c, p);
       }
     }
     // Level-up events raised by grant() above.
@@ -578,6 +775,11 @@ export class WorldRoom extends Room<WorldState> {
         return true;
       case 'grab':
         return nearId(ev.target) || nearId(ev.owner);
+      case 'structHit':
+        return false;
+      case 'struct':
+      case 'craft':
+        return near(ev.pos[0], ev.pos[2]);
     }
   }
 

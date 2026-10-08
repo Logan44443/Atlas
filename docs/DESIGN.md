@@ -134,6 +134,8 @@ Default PC layout (third-person action, keyboard + mouse):
 | Toggle PvP flag | P |
 | Mastery tree / invite to party / accept / decline | K / I / Y / N |
 | Special Art (equipped) / Arts & quests panel | T / J |
+| Camp panel (bag, build, chest, forge) / channel (bend-craft) | B / C |
+| While placing a piece: place / rotate / cancel | Left click / R / B |
 
 - **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
   mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
@@ -238,6 +240,25 @@ it meaning.
 
 Building data goes in `data/buildings/*.json`.
 
+**As built (Phase 9)**: camps do more than the design above asked, because crews (and so crew bases) arrive in
+Phase 11. Until then every character's camp is their base:
+- One camp per character, anchored by its **campfire** (the core and respawn point). Only in the Wilds, at least
+  100 m beyond a hub's safe radius, and two campfires keep 56 m apart. Every other piece must stand within 28 m of
+  your own campfire; at most 40 pieces.
+- 18 pieces in `data/buildings/pieces.json`: campfire, tent, chest (storage), wood/stone/mud/magma-brick/obsidian/
+  metal walls, wood gate, glass window wall, watchtower, sandstone bridge (walkable, can cross water), steam vent
+  (blinds enemies who step on it), forge (forge recipes), ice lantern, element shrine (+5% XP for your side's
+  players near it), training post. Snap to a 1 m grid, quarter-turn rotation, a ghost shows where it goes and why
+  it can't (red).
+- Pieces cost materials; taking one down refunds half. The campfire comes down last and a chest must be empty.
+- **Raids**: structures take bending damage only from the **other side**, only during the **raid window**
+  (19:00-22:00 UTC every day for now; crews set their own in Phase 11) and never in a safe zone. Earth deals 1.5x.
+  Solid pieces stop projectiles. The campfire can be damaged but never destroyed (it holds at 1 hp).
+- A camp burns down after its owner has been offline for 24 hours.
+- XP milestones: first camp (100), a 10-piece camp (150), first metal wall (200).
+- Online, the server keeps one structure registry for all shards (PostgreSQL `structures` table); offline camps
+  are saved in the browser.
+
 ## 10a. Bending crafting (element combos)
 
 Players can build and craft *through bending*: combining two elements, or an element with something in the
@@ -256,6 +277,20 @@ partner (party member or hired NPC companion); a few use the environment so solo
 - Combo strength scales with both casters' Bending Levels; matching Special Arts unlock upgraded recipes
   (Metalbending → steel beams, Lavabending → obsidian).
 - All recipes live in `data/crafting/combos.json` (inputs, window, range, chi cost, output, quantity, cooldown).
+
+**As built (Phase 9)**:
+- **Resource nodes** (timber, boulder, sand bank, ore vein, hot spring, ash pile) are scattered through the world
+  deterministically from the seed (`shared/resources.ts`), with 8 starter nodes outside every hub gate. Interact (G)
+  gathers by hand (wood, stone, sand, raw ore); each node regrows per player.
+- **Channel (C)**: next to a node of the right kind, your element makes the environment material (fire + sand →
+  glass, water + hot spring → steam core, earth + ore vein → refined ore, air + ash → charcoal). Otherwise you
+  wait up to 1.5 s for an ally of your side with a different element to channel within range: both get the
+  output (mud, steam core, magma brick, ice crystal, forge heat, sandstone). Lava and Metal Special Arts upgrade
+  magma brick → obsidian and forge heat → steel beams.
+- Outputs are materials only (structures are built from them in the camp panel). Combo strength doesn't scale
+  with level yet.
+- **Forge** recipes at a placed forge: refined ore + charcoal → metal plate, refined ore + forge heat → steel beam.
+- Bag holds 120 items, a chest 400 (`data/crafting/materials.json`).
 
 ## 11. Pets and mounts
 
@@ -287,7 +322,7 @@ Pet data goes in `data/pets/*.json`.
 6. **Characters and factions**: account and character creation (element + faction picker), faction hubs, NPC members, safe/wild/contested zones, PvP flag.
 7. **Progression**: XP, levels, mastery trees, parties and shared XP, anti-griefing rules. Party combat combos (e.g. steam blind).
 8. **Special Arts**: master NPCs and quests, then implement the arts one at a time.
-9. **Building**: camps, then bending crafting (element combo recipes, section 10a), then crew bases, raid windows.
+9. **Building**: camps, then bending crafting (element combo recipes, section 10a), then crew bases, raid windows. *(Done, except crew bases and crew-set raid windows, which move to Phase 11 with crews.)*
 10. **Pets**: common taming, then rare, then legendary world bosses and the Bond Trial.
 11. **Territory wars, crews, polish, deployment**: CDN, servers, monitoring.
 

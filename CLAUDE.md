@@ -27,7 +27,12 @@ This file covers architecture, layout, conventions and the current phase. Update
   Lava pool -> rock wall, Combustion, Glider, Flight, night-only Bloodbending with faction penalty, Spirit
   Projection; master NPCs with camps, step quests (talk/visit/kill/meditate), Arts panel `J` with quest compass,
   Art slot `T`). Verified with `scripts/phase8-test.mjs`.
-- **Phase 9 Building**: next.
+- **Phase 9 Building**: done (resource nodes + gathering, bending crafting by channelling (environment and
+  same-side ally combos, art upgrades), forge, camps of up to 40 pieces from `data/buildings/pieces.json` with a
+  placement ghost, chest storage, campfire respawn, steam vents, element shrine XP, raid windows with Earth bonus,
+  24 h burn-down, PostgreSQL `structures`). Crew bases and crew-set raid windows move to Phase 11 with crews.
+  Verified with `scripts/building-check.ts` and `scripts/phase9-test.mjs`.
+- **Phase 10 Pets**: next.
 - README.md is owned by a separate thread: don't edit it from build threads.
 
 ## Run it
@@ -48,6 +53,8 @@ node scripts/phase6-test.mjs       # title screen, hub spawn, NPC talk, safe vs 
 npx tsx scripts/progression-check.ts   # XP/mastery/combo rules without a browser
 node scripts/phase7-test.mjs       # party invite, steam combo, shared XP, discovery level-up, mastery panel, saves
 node scripts/phase8-test.mjs       # Healing quest online, night-only Bloodbending, every other art offline
+npx tsx scripts/building-check.ts  # placement/inventory/raid/burn/crafting rules without a browser
+node scripts/phase9-test.mjs       # gather, channel, ally mud, build a camp with the ghost, chest, raid window, reload, offline camp
 ```
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
@@ -55,7 +62,8 @@ URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?n
 `?char=Name&el=fire&fac=sentinel` (skip the title screen: pick or create that character; tests use it and
 `smoke.mjs` adds it by default).
 In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag, `K` mastery tree,
-`I` invite the player in front of you, `Y`/`N` answer an invite.
+`I` invite the player in front of you, `Y`/`N` answer an invite, `B` camp panel (bag/build/chest/forge), `C` channel
+(bend-craft), `G` also gathers at resource nodes. Dev shards accept `dev:xp`, `dev:clock`, `dev:raid`, `dev:give`, `dev:clearCamp`.
 
 ## Stack (fixed by design)
 
@@ -74,10 +82,12 @@ client/              Vite root (index.html, src/, public/)
   src/game/combat/   host (CombatHost: LocalCombat offline), CombatView (sim events -> meshes/VFX), DummyView, abilities (input -> cast requests), VFX particles
   src/game/remotePlayers.ts   avatars + nameplates for other players
   src/world/hubs.ts  faction hub + shrine buildings (merged geometry, instanced lanterns, box colliders)
+  src/world/campView.ts   StructureView (camp pieces: merged primitives + Rapier boxes) and ResourceView (instanced nodes)
   src/net/           NetCombat: Colyseus client, entity mirror + interpolation, move/cast messages
   src/net/account.ts AccountClient: guest/register/login, character list (offline: localStorage roster)
   src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog,
-                     progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), artsUi (arts panel + quest compass), CSS
+                     progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), artsUi (arts panel + quest compass),
+                     buildUi (camp panel, placement ghost, gather/channel prompts), CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -92,12 +102,17 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   factions.ts        factions, sides, zones (zoneAt), PvP numbers, hub flats -> terrainConfig(), hubSpawn
   names.ts           name/username/password validation shared by client and server
   arts.ts            Special Arts list, ArtsState, QuestRules (talk/visit/kill/meditate), quest status/compass target
+  resources.ts       deterministic resource nodes per chunk (+ hub starter nodes), nearestNode/nodeById
+  building.ts        pieces, inventories, Camps (placement rules, damage + raid windows, burn-down), snapping
+  crafting.ts        CraftRules: gather, channel (environment + ally combos), forge
+  campRules.ts       milestone XP, shrine bonus, steam vents, campfire respawn (shared by both authorities)
   progression.ts     XP curve, kill/discovery rewards (XpRules), mastery validation, Mods + modKit()
   clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
   net.ts             wire protocol types (move/cast/welcome/correct/events)
 server/              Node shard server: index.ts (HTTP /health, /shards, /api + Colyseus), worldRoom.ts, schema.ts
   api.ts             account/character REST endpoints (rate-limited)
   parties.ts         party/invite bookkeeping per shard
+  camps.ts           the process-wide Camps (all shards share it), batched saves, burn-down timer
   db/                Store interface: PgStore (migrations db/*.sql) and MemoryStore
 data/                ALL tunable numbers (JSON). Edit these, not code.
   quality.json       Low/Medium/High presets (pixel ratio, shadows, grass, rings, LOD)
@@ -107,7 +122,9 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   controls.json      default key bindings (players override in Settings, saved to localStorage `fw.settings`)
   character.json     movement, dodge, swim and camera tuning
   combat.json, abilities/*.json   bending numbers (Phase 4)
-  crafting/combos.json            element combo recipes (Phase 9)
+  crafting/combos.json            bending craft recipes: ally pairs, environment sources, art upgrades
+  crafting/materials.json         materials, bag/chest size, resource node yields/cooldowns, forge recipes
+  buildings/pieces.json, rules.json   camp pieces (size/hp/cost/effect) and camp/raid rules
   net.json           tick/patch rates, shard size, interest radii, interpolation delay, movement tolerances
   factions.json      factions, hub positions/styles/safe radius, NPC roster/levels/names
   zones.json         contested shrines and PvP rules (flag level, spawn protection, low-level scaling)
@@ -173,6 +190,14 @@ docs/DESIGN.md       game design (keep in sync)
   `Wall`), `grab` (blood), `flight`, `spirit`; `grapple` projectiles. Flight/spirit are toggles: recasting ends them
   and the sim announces the end (`fly`/`spirit` with duration 0). The client runs the movement side (`Player.fly`,
   glider, `frozen` during spirit). Dev shards accept `dev:xp` and `dev:clock` (shift the shard clock in hours).
+- **Camps/crafting**: `Camps` (shared/building.ts) holds every structure and a `solids` map of boxes the sim
+  reads: solid pieces stop projectiles, and players' bending that reaches a structure emits an internal
+  `structHit` event. The authority passes it to `Camps.damage` (other side, raid window, not in a safe zone,
+  Earth x1.5) and broadcasts a `struct` event for VFX. Online one `Camps` lives in `server/camps.ts` for the whole
+  process; each room listens for changes and streams structures within 320 m to its clients (`structs` /
+  `structDel`); clients keep a mirror `Camps` so the placement ghost runs the same `check()`. Materials live in
+  `Progress.inv`, chest contents on the chest structure. `CraftRules` keeps channel windows and cooldowns per
+  room/tab. Offline camps are saved to localStorage `fw.camps`.
 - **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
   are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
 

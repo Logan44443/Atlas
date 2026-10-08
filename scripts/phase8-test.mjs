@@ -34,7 +34,7 @@ async function open(label, query) {
   });
   const u = new URL(base);
   u.search = query;
-  await page.goto(u.toString());
+  await page.goto(u.toString(), { timeout: 120000 });
   await page.waitForSelector('#loading.done', { timeout: 240000 });
   await page.evaluate(() => {
     const f = window.__fw;
@@ -127,7 +127,7 @@ const night = () => w.page.evaluate(() => window.__fw.dayNight.nightFactor);
 // Find an hour shift that makes it day, then night.
 for (const shift of [0, 6, 12, 18]) {
   await w.page.evaluate((h) => window.__fw.host.devClock(h), shift);
-  await w.page.waitForTimeout(2500);
+  await w.page.waitForTimeout(5000);
   if ((await night()) < 0.2) break;
 }
 await w.page.evaluate(() => window.__fw.host.talkTo('master_blood'));
@@ -136,7 +136,7 @@ await w.page.waitForTimeout(1500);
 ok(!(await arts(w)).quests.blood, `by day (night ${(await night()).toFixed(2)}) the Pale Lady sends W away`);
 for (const shift of [12, 6, 18, 0]) {
   await w.page.evaluate((h) => window.__fw.host.devClock(h), shift);
-  await w.page.waitForTimeout(2500);
+  await w.page.waitForTimeout(5000);
   if ((await night()) > 0.7) break;
 }
 await w.page.evaluate(() => window.__fw.host.talkTo('master_blood'));
@@ -153,6 +153,8 @@ const wa2 = await arts(w);
 ok(wa2.learned.includes('healing') && wa2.equipped === 'healing' && wa2.quests.blood?.step === 1, 'after reload: Healing learned + equipped, Bloodbending quest kept');
 
 // ---------- Offline: the other arts ----------
+// SwiftShader is slow: close each page once its part is done.
+await w.ctx.close();
 // Fire: Lightning strikes a dummy in a line after charging.
 const f = await open('F', `offline&char=Kazan${run}&el=fire&fac=redfang`);
 await goTo(f, 0, -12);
@@ -165,6 +167,8 @@ const charges = await events(f, 'charge');
 const hp1 = await f.page.evaluate(() => window.__fw.host.entities.get('dummy_a').hp);
 ok(charges.length > 0 && beams.length > 0 && hp1 < hp0, `Lightning: charge ${charges[0]?.duration}s then beam, dummy ${hp0} -> ${hp1}`);
 await f.page.screenshot({ path: `${outDir}/p8-lightning.png` });
+
+await f.ctx.close();
 
 // Water: Healing restores health and cleanses burn.
 const h = await open('H', `offline&char=Kya${run}&el=water&fac=sentinel`);
@@ -179,18 +183,25 @@ await waitSim(h, 3.2);
 const hh = await h.page.evaluate(() => ({ hp: window.__fw.host.me.hp, burn: window.__fw.host.me.statuses.has('burn') }));
 ok(hh.hp > 100 && !hh.burn, `Healing: 60 -> ${hh.hp} hp, burn cleansed: ${!hh.burn}`);
 
+await h.ctx.close();
+
 // Earth: Metal cable drags a dummy; lava pool burns and cools into a wall.
 const e = await open('E', `offline&char=Toph${run}&el=earth&fac=sentinel`);
 // Stand 8 m from the dummy so the cable has a clear line (no terrain in between).
 const da = await e.page.evaluate(() => window.__fw.host.entities.get('dummy_a').pos.clone());
 await goTo(e, da.x, da.z - 8);
 await grantOffline(e, 35, ['metal', 'lava'], 'metal');
-await castArt(e, 'dummy_a');
-await until(e, () => window.__fw.__ev.some((x) => x.t === 'hit' && x.target === 'dummy_a'), null, 30000).catch(() => {});
+// The dummy can block or step aside; give the cable a few tries (waiting out the Art cooldown).
+for (let i = 0; i < 3 && !(await e.page.evaluate(() => window.__fw.__ev.some((x) => x.t === 'impulse' && x.target === 'dummy_a'))); i++) {
+  await until(e, () => (window.__fw.host.me.cooldowns.get('art') ?? 0) <= 0.05, null, 60000).catch(() => {});
+  await castArt(e, 'dummy_a');
+  await until(e, () => window.__fw.__ev.some((x) => x.t === 'impulse' && x.target === 'dummy_a'), null, 20000).catch(() => {});
+}
 const pulled = await e.page.evaluate(() => window.__fw.__ev.filter((x) => x.t === 'impulse' && x.target === 'dummy_a').map((x) => x.v));
 ok(pulled.length > 0 && pulled[0][2] < 0, `Metal cable hit dummy_a and pulled it toward the caster (impulse z ${pulled[0]?.[2]?.toFixed(1)})`);
 await e.page.evaluate(() => window.__fw.host.equipArt('lava'));
-await waitSim(e, 0.5);
+// The Art slot keeps its cooldown when you swap arts (no swap-to-reset).
+await waitSim(e, 8.5);
 await castArt(e, 'dummy_b');
 await until(e, () => window.__fw.__ev.some((x) => x.t === 'area' && x.ability === 'lava'), null, 30000).catch(() => {});
 ok((await events(e, 'area')).some((x) => x.ability === 'lava'), 'Lava pool placed');
@@ -200,6 +211,8 @@ await e.page.screenshot({ path: `${outDir}/p8-lava.png` });
 await until(e, () => window.__fw.__ev.some((x) => x.t === 'wall'), null, 120000).catch(() => {});
 ok((await events(e, 'wall')).length > 0, 'lava cooled into a rock wall');
 await e.page.screenshot({ path: `${outDir}/p8-wall.png` });
+
+await e.ctx.close();
 
 // Air: glider at level 10, then flight and spirit projection.
 const a = await open('A', `offline&char=Aang${run}&el=air&fac=freeisles`);
@@ -226,15 +239,19 @@ const glide = await a.page.evaluate(() => ({ g: window.__fw.player.gliding, vy: 
 ok(glide.g && glide.vy > -3.5, `recast ends flight; jump in the air opens the glider (fall ${glide.vy.toFixed(1)} m/s)`);
 await until(a, () => window.__fw.player.grounded, null, 60000).catch(() => {});
 await a.page.evaluate(() => window.__fw.host.equipArt('spirit'));
-await waitSim(a, 0.5);
-const body = await a.page.evaluate(() => window.__fw.player.renderPos.clone());
+// Let the landing settle so the body is really standing still.
+await waitSim(a, 2);
+// Flight and spirit share the Art slot's cooldown.
+await until(a, () => (window.__fw.host.me.cooldowns.get('art') ?? 0) <= 0.05, null, 120000).catch(() => {});
 await castArt(a, null);
 await until(a, () => window.__fw.spirit.t > 0, null, 20000).catch(() => {});
+const body = await a.page.evaluate(() => window.__fw.player.renderPos.clone());
+const cam0 = await a.page.evaluate(() => window.__fw.camera.position.clone());
 await a.page.keyboard.down('KeyW');
 await waitSim(a, 1.5);
 await a.page.keyboard.up('KeyW');
-const sp = await a.page.evaluate((b) => ({ t: window.__fw.spirit.t, frozen: window.__fw.player.frozen, moved: window.__fw.player.renderPos.distanceTo(b), cam: window.__fw.camera.position.distanceTo(b) }), body);
-ok(sp.t > 0 && sp.frozen && sp.moved < 0.5 && sp.cam > 5, `Spirit projection: body stays (${sp.moved.toFixed(2)} m), spirit camera roams (${sp.cam.toFixed(1)} m away)`);
+const sp = await a.page.evaluate(([b, c]) => ({ t: window.__fw.spirit.t, frozen: window.__fw.player.frozen, moved: Math.hypot(window.__fw.player.renderPos.x - b.x, window.__fw.player.renderPos.z - b.z), cam: window.__fw.camera.position.distanceTo(c) }), [body, cam0]);
+ok(sp.t > 0 && sp.frozen && sp.moved < 0.5 && sp.cam > 5, `Spirit projection (${sp.t > 0 ? 'active' : 'not active'}): body stays (${sp.moved.toFixed(2)} m sideways), spirit camera roams (${sp.cam.toFixed(1)} m away)`);
 await a.page.screenshot({ path: `${outDir}/p8-spirit.png` });
 await castArt(a, null);
 await until(a, () => window.__fw.spirit.t <= 0, null, 20000).catch(() => {});

@@ -1,0 +1,14 @@
+{
+  "_comment": "Camp rules (design section 10). One camp per character, Wilds only, not within minHubDistance of a hub. Everything else must be within campRadius of your campfire. grid = snap size in metres; rotation snaps to 90 degrees. A camp whose owner has been offline for burnOfflineHours burns down. Structures can only be damaged by the other side, and only during a raid window (UTC hours, every day) until crews set their own (Phase 11). earthBonus multiplies Earth bending damage to structures.",
+  "campRadius": 28,
+  "minHubDistance": 100,
+  "maxPieces": 40,
+  "grid": 1,
+  "placeRange": 14,
+  "burnOfflineHours": 24,
+  "raidWindowsUtc": [{ "start": 19, "hours": 3 }],
+  "earthBonus": 1.5,
+  "vent": { "every": 3, "radius": 3.5, "blindSeconds": 2 },
+  "shrineXpBonus": 0.05,
+  "milestones": { "firstCamp": 100, "pieces10": 150, "firstMetal": 200 }
+}
