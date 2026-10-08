@@ -1,0 +1,77 @@
+{
+  "_comment": "Factions (DESIGN section 4). hub: x/z centre (chosen on flat land), radius = flattened plaza, safeRadius = safe zone. perk numbers are applied as their systems arrive (bounties/XP Phase 7, shrines/raids Phase 11, mounts later).",
+  "sides": {
+    "order": { "name": "Order", "color": "#4f8fe0" },
+    "outlaw": { "name": "Outlaw", "color": "#d0473a" }
+  },
+  "factions": [
+    {
+      "id": "sentinel", "name": "Sentinel Corps", "side": "order", "color": "#3f6fd8", "trim": "#e8d9a8", "emblem": "🛡️",
+      "identity": "City police; lawful and disciplined.",
+      "perk": { "type": "bountyDamage", "value": 0.10, "text": "+10% damage against Outlaws holding bounties" },
+      "hub": { "name": "Sentinel Bastion", "x": -400, "z": -960, "radius": 46, "safeRadius": 95, "style": "fort" }
+    },
+    {
+      "id": "lantern", "name": "Lantern Order", "side": "order", "color": "#e0b33a", "trim": "#8a3a1f", "emblem": "🏮",
+      "identity": "Monks who guard the spirit shrines.",
+      "perk": { "type": "shrineSustain", "value": 0.15, "text": "+15% healing and chi regeneration near shrines" },
+      "hub": { "name": "Lantern Monastery", "x": -1090, "z": -490, "radius": 42, "safeRadius": 90, "style": "temple" }
+    },
+    {
+      "id": "freeisles", "name": "Free Isles League", "side": "order", "color": "#2fa6a0", "trim": "#f2efe6", "emblem": "⚓",
+      "identity": "Sailors and explorers.",
+      "perk": { "type": "mountSpeed", "value": 0.20, "text": "+20% mount speed; discounted sea travel" },
+      "hub": { "name": "Driftwood Harbor", "x": 740, "z": -1020, "radius": 44, "safeRadius": 92, "style": "harbor" }
+    },
+    {
+      "id": "redfang", "name": "Red Fang Triad", "side": "outlaw", "color": "#c22f2f", "trim": "#1d1d1d", "emblem": "🐺",
+      "identity": "Street gang that recruits all elements; three fangs tattoo.",
+      "perk": { "type": "pvpXp", "value": 0.10, "text": "+10% XP from PvP; access to black-market vendors" },
+      "hub": { "name": "Fang Alley", "x": -480, "z": 980, "radius": 42, "safeRadius": 88, "style": "den" }
+    },
+    {
+      "id": "ash", "name": "Ash Syndicate", "side": "outlaw", "color": "#5d5a55", "trim": "#e07a2c", "emblem": "🔥",
+      "identity": "Smugglers and saboteurs.",
+      "perk": { "type": "offWindowRaids", "value": 1, "text": "Can raid bases outside the normal raid windows (with heavy limits)" },
+      "hub": { "name": "Cinder Wharf", "x": 100, "z": 1230, "radius": 44, "safeRadius": 90, "style": "den" }
+    },
+    {
+      "id": "hollowmoon", "name": "Hollow Moon Cult", "side": "outlaw", "color": "#6d3fa8", "trim": "#cfc8e8", "emblem": "🌑",
+      "identity": "Secretive users of forbidden arts.",
+      "perk": { "type": "bloodbendingFree", "value": 1, "text": "Only faction that can learn Bloodbending without a penalty" },
+      "hub": { "name": "Hollow Sanctum", "x": 1070, "z": 880, "radius": 40, "safeRadius": 86, "style": "temple" }
+    }
+  ],
+  "npcs": {
+    "_comment": "NPC members placed at every hub. role: vendor|trainer|quest|guard|fighter. offset is from the hub centre (metres).",
+    "roster": [
+      { "role": "vendor", "title": "Quartermaster", "offset": [-10, 6] },
+      { "role": "trainer", "title": "Bending Master", "offset": [10, 6] },
+      { "role": "quest", "title": "Envoy", "offset": [0, -8] },
+      { "role": "guard", "title": "Gate Guard", "offset": [-5, 44] },
+      { "role": "guard", "title": "Gate Guard", "offset": [5, 44] },
+      { "role": "fighter", "title": "Patrol", "offset": [0, 118], "patrolRadius": 24 },
+      { "role": "fighter", "title": "Patrol", "offset": [118, 0], "patrolRadius": 24 }
+    ],
+    "health": { "vendor": 400, "trainer": 600, "quest": 400, "guard": 700, "fighter": 320 },
+    "level": { "vendor": 10, "trainer": 30, "quest": 10, "guard": 25, "fighter": 6 },
+    "aggroRange": 16,
+    "leashRange": 40,
+    "attackRange": 18,
+    "walkSpeed": 3.2,
+    "runSpeed": 6.5,
+    "thinkEvery": 0.6,
+    "respawnSeconds": 45,
+    "lines": {
+      "vendor": ["Wares arrive with the next caravan. Come back soon.", "Coin talks, friend. Not today, though."],
+      "trainer": ["Your stance is sloppy. Train with the dummies and return when you are stronger.", "Mastery is patience. Special Arts come later."],
+      "quest": ["Our faction needs capable benders. Tasks will be posted soon.", "Keep your eyes open out there."],
+      "guard": ["Move along.", "No fighting inside the walls."],
+      "fighter": ["Stay sharp out there.", "Seen any of the other side around?"]
+    },
+    "names": {
+      "order": ["Kesh", "Ryo", "Amaya", "Tomas", "Lien", "Haru", "Mira", "Daro", "Sora", "Jin", "Nalu", "Ozan"],
+      "outlaw": ["Vex", "Sable", "Krell", "Juno", "Rask", "Ines", "Mox", "Tarn", "Zhi", "Corva", "Bram", "Quill"]
+    }
+  }
+}

@@ -1,6 +1,6 @@
 // Wire protocol between the browser and a shard (WorldRoom).
 import netData from '../data/net.json';
-import type { ElementId, Slot } from './combat';
+import type { Slot } from './combat';
 import type { SimEvent } from './sim/combatSim';
 
 export const NET = netData;
@@ -10,8 +10,9 @@ export type V3 = [number, number, number];
 
 /** Options sent with joinOrCreate / joinById. */
 export interface JoinOptions {
-  name: string;
-  element: ElementId;
+  /** session token from the account API */
+  token: string;
+  characterId: string;
 }
 
 /** Client -> server, ~20 Hz: where the predicted character is. */
@@ -40,6 +41,9 @@ export interface WelcomeMsg {
   spawn: V3;
   serverTime: number;
   tickRate: number;
+  characterId: string;
+  faction: string;
+  level: number;
 }
 
 /** Server -> client: the move was rejected, snap back here. */

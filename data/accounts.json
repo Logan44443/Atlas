@@ -1,0 +1,7 @@
+{
+  "_comment": "Accounts and characters. Guests get a device-bound account they can later turn into a named one.",
+  "characterSlots": 4,
+  "sessionDays": 90,
+  "guestPerIpPerHour": 30,
+  "saveEverySeconds": 30
+}

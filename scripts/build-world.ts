@@ -7,16 +7,19 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import worldData from '../data/world.json' with { type: 'json' };
 import propsData from '../data/props.json' with { type: 'json' };
-import { TerrainSampler, type TerrainConfig } from '../shared/terrain';
+import factionData from '../data/factions.json' with { type: 'json' };
+import zoneData from '../data/zones.json' with { type: 'json' };
+import { TerrainSampler } from '../shared/terrain';
+import { terrainConfig, FLATS } from '../shared/factions';
 import { mulberry32 } from '../shared/noise';
 import { CHUNK_SAMPLES, CHUNK_RES, HEIGHT_SCALE, chunkKey, type ChunkJson, type PropInstance, type PropType, type WorldManifest } from '../shared/world';
 
 const GENERATOR_VERSION = 3;
 const outDir = join(import.meta.dirname, '..', 'client', 'public', 'world');
 const chunkDir = join(outDir, 'chunks');
-const cfg = worldData as unknown as TerrainConfig;
+const cfg = terrainConfig();
 const configHash = createHash('sha1')
-  .update(JSON.stringify(worldData) + JSON.stringify(propsData) + GENERATOR_VERSION)
+  .update(JSON.stringify(worldData) + JSON.stringify(propsData) + JSON.stringify(factionData.factions.map((f) => f.hub)) + JSON.stringify(zoneData.contested) + GENERATOR_VERSION)
   .digest('hex')
   .slice(0, 12);
 
@@ -78,6 +81,8 @@ for (let cz = minChunk; cz <= maxChunk; cz++) {
           if (cluster < rule.clusterThreshold || r > (cluster - rule.clusterThreshold) * 3) continue;
           // Keep the spawn clearing open.
           if (Math.hypot(wx - worldData.spawn.x, wz - worldData.spawn.z) < 18) continue;
+          // ...and the hub plazas and shrine platforms.
+          if (FLATS.some((f) => Math.hypot(wx - f.x, wz - f.z) < f.radius + 10)) continue;
           props.push({ t: rule.type, p: [+lx.toFixed(2), +(h - 0.1).toFixed(2), +lz.toFixed(2)], r: +yaw.toFixed(3), s: +(rule.scale[0] + (rule.scale[1] - rule.scale[0]) * sc).toFixed(2) });
         }
       }

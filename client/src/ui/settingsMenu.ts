@@ -1,4 +1,4 @@
-import { ACTIONS, RESERVED, keyLabel, validateName, defaultBindings, type Settings, type PlayerSettings } from '../engine/settings';
+import { ACTIONS, RESERVED, keyLabel, validateName, defaultBindings, type Settings } from '../engine/settings';
 import type { Input } from '../engine/input';
 import type { QualitySetting } from '../engine/quality';
 
@@ -6,6 +6,8 @@ export interface SettingsMenuHooks {
   getQuality(): QualitySetting;
   setQuality(q: QualitySetting): void;
   onOpenChange(open: boolean): void;
+  characterInfo?(): string;
+  onSwitchCharacter?(): void;
 }
 
 /** Esc / gear menu: display name, mouse, graphics and full control rebinding. */
@@ -68,11 +70,10 @@ export class SettingsMenu {
           <input id="set-name" maxlength="16" value="${escapeHtml(d.name)}" autocomplete="off" spellcheck="false" />
           <small id="set-name-err" class="err"></small>
         </label>
-        <label class="field"><span>Element <small>(testing only: becomes permanent at character creation)</small></span>
-          <select id="set-element">
-            ${['fire', 'water', 'earth', 'air'].map((e) => `<option value="${e}" ${d.element === e ? 'selected' : ''}>${e[0].toUpperCase() + e.slice(1)}</option>`).join('')}
-          </select>
-        </label>
+        <div class="field"><span>Character</span>
+          <div class="char-line"><span>${escapeHtml(this.hooks.characterInfo?.() ?? '')}</span>
+          <button id="set-chars" class="secondary">Switch character</button></div>
+        </div>
         <label class="field"><span>Mouse sensitivity <b id="sens-val">${d.mouseSensitivity.toFixed(2)}</b></span>
           <input id="set-sens" type="range" min="0.2" max="3" step="0.05" value="${d.mouseSensitivity}" />
         </label>
@@ -125,16 +126,22 @@ export class SettingsMenu {
     const name = $<HTMLInputElement>('#set-name');
     if (name) {
       const err = $<HTMLElement>('#set-name-err')!;
-      const commit = () => {
+      const check = () => {
         const msg = validateName(name.value);
         err.textContent = msg ?? '';
         name.classList.toggle('bad', !!msg);
-        if (!msg) {
-          this.settings.data.name = name.value.trim().replace(/\s+/g, ' ');
+        return !msg;
+      };
+      // Validate while typing; rename on Enter or when the field loses focus.
+      const commit = () => {
+        const v = name.value.trim().replace(/\s+/g, ' ');
+        if (check() && v !== this.settings.data.name) {
+          this.settings.data.name = v;
           this.settings.save();
         }
       };
-      name.addEventListener('input', commit);
+      name.addEventListener('input', check);
+      name.addEventListener('change', commit);
       name.addEventListener('keydown', (e) => e.stopPropagation());
     }
     const sens = $<HTMLInputElement>('#set-sens');
@@ -148,11 +155,7 @@ export class SettingsMenu {
       this.settings.data.invertY = inv.checked;
       this.settings.save();
     });
-    const el = $<HTMLSelectElement>('#set-element');
-    el?.addEventListener('change', () => {
-      this.settings.data.element = el.value as PlayerSettings['element'];
-      this.settings.save();
-    });
+    $('#set-chars')?.addEventListener('click', () => this.hooks.onSwitchCharacter?.());
     const q = $<HTMLSelectElement>('#set-quality');
     q?.addEventListener('change', () => this.hooks.setQuality(q.value as QualitySetting));
 

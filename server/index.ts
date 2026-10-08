@@ -1,15 +1,22 @@
 // Four Winds shard server: Colyseus over WebSocket plus a tiny HTTP API.
 //   GET /health  -> ok
 //   GET /shards  -> open world shards with player counts (for the join flow)
+//   /api/*       -> accounts and characters (server/api.ts)
 import http from 'node:http';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { NET, ROOM_NAME } from '../shared/net';
 import { WorldRoom } from './worldRoom';
+import { openStore } from './db/store';
+import { createApi } from './api';
 
 const port = Number(process.env.PORT ?? NET.port);
+const store = await openStore();
+WorldRoom.store = store;
+const api = createApi(store);
 
 const httpServer = http.createServer(async (req, res) => {
+  if (await api(req, res)) return;
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.url === '/health') {
     res.end('ok');

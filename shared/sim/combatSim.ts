@@ -12,6 +12,7 @@ import {
   matchup, elementPower, canBend, levelPower,
   type AbilityDef, type CombatConfig, type ElementContext, type ElementId, type ElementKit, type Slot, type StatusDef, type StatusType,
 } from '../combat';
+import { zoneAt, PVP } from '../factions';
 
 export const CFG = combatData as unknown as CombatConfig;
 export const KITS: Record<ElementId, ElementKit> = {
@@ -45,7 +46,10 @@ export interface Shield {
 export interface SimEntity {
   id: string;
   name: string;
-  kind: 'player' | 'dummy';
+  kind: 'player' | 'dummy' | 'npc';
+  /** NPC role (vendor, trainer, quest, guard, fighter) and title shown on its nameplate. */
+  role?: string;
+  title?: string;
   team: Team;
   element: ElementId | null;
   level: number;
@@ -71,18 +75,38 @@ export interface SimEntity {
   pendingImpulse: Vector3;
   /** Element context for bending bonuses (time of day etc.), set by the host each tick. */
   ctx: ElementContext;
-  /** Opted in to PvP: flagged players can hit each other whatever their team. */
+  /** Opted in to PvP (wilds): flagged players of opposite sides can fight. */
   pvp: boolean;
+  /** Faction id and side ('order' | 'outlaw'); '' for none (dummies, wild creatures). */
+  faction: string;
+  side: string;
+  /** Sim time until which other players can't hurt this entity (spawn protection). */
+  protectedUntil: number;
   /** Facing, for remote rendering. */
   yaw: number;
   /** 0..1 attack telegraph (dummies), replicated so players can time blocks. */
   windup: number;
 }
 
-export function isEnemy(a: SimEntity, b: SimEntity): boolean {
-  if (a === b) return false;
-  if (a.team !== b.team) return true;
-  return a.kind === 'player' && b.kind === 'player' && a.pvp && b.pvp;
+/**
+ * Who may damage whom. Zones: nobody fights inside a safe zone, opposite sides
+ * always may in contested territory, and in the wilds players need both PvP
+ * flags up. Allies (same side) never hurt each other. Dummies only fight players.
+ */
+export function canHarm(a: SimEntity, b: SimEntity, time = 0): boolean {
+  if (a === b || b.dead) return false;
+  if (a.kind === 'dummy' || b.kind === 'dummy') return a.kind !== b.kind && (a.kind === 'player' || b.kind === 'player');
+  if (a.side && a.side === b.side) return false;
+  const zb = zoneAt(b.pos.x, b.pos.z).kind;
+  const za = zoneAt(a.pos.x, a.pos.z).kind;
+  if (za === 'safe' || zb === 'safe') return false;
+  if (a.kind === 'player' && b.kind === 'player') {
+    if (b.protectedUntil > time) return false;
+    if (za === 'contested' || zb === 'contested') return true;
+    return a.pvp && b.pvp;
+  }
+  // NPCs: rival sides fight; wild creatures fight everyone.
+  return true;
 }
 
 export type SimEvent =
@@ -161,6 +185,9 @@ export function createEntity(p: Partial<SimEntity> & Pick<SimEntity, 'id' | 'nam
     pendingImpulse: new Vector3(),
     ctx: defaultContext(),
     pvp: false,
+    faction: '',
+    side: '',
+    protectedUntil: 0,
     yaw: 0,
     windup: 0,
     ...p,
@@ -201,7 +228,7 @@ export class CombatSim {
   }
   enemiesOf(e: SimEntity): SimEntity[] {
     const out: SimEntity[] = [];
-    for (const o of this.entities.values()) if (!o.dead && isEnemy(e, o)) out.push(o);
+    for (const o of this.entities.values()) if (!o.dead && canHarm(e, o, this.time)) out.push(o);
     return out;
   }
 
@@ -350,6 +377,8 @@ export class CombatSim {
     }
     src.lastCombat = target.lastCombat = this.time;
     let dmg = ability.damage * power * matchup(CFG, element, target.element);
+    // Anti-griefing: much higher-level players hit low-level ones softly.
+    if (src.kind === 'player' && target.kind === 'player' && src.level - target.level >= PVP.lowLevelGap) dmg *= PVP.lowLevelDamageScale;
     let result: 'hit' | 'blocked' = 'hit';
     if (target.blocking) {
       if (this.time - target.blockStart <= CFG.block.perfectWindow) {
@@ -484,7 +513,7 @@ export class CombatSim {
     const pr = p.ability.radius ?? 0.4;
     const c = new Vector3();
     for (const t of this.entities.values()) {
-      if (t.dead || !isEnemy(p.owner, t)) continue;
+      if (t.dead || !canHarm(p.owner, t, this.time)) continue;
       if (t.shield?.blocksProjectiles && p.pos.distanceTo(center(t, c)) < t.shield.radius + pr) {
         if (t.shield.element === 'air' && p.element === 'fire') {
           // Fire burns away Air's barriers.
@@ -520,7 +549,7 @@ export class CombatSim {
   private splash(p: Projectile): void {
     const r = p.ability.splash!;
     for (const t of this.entities.values()) {
-      if (t.dead || !isEnemy(p.owner, t)) continue;
+      if (t.dead || !canHarm(p.owner, t, this.time)) continue;
       if (distToCapsule(t, p.pos) <= r) this.hit(p.owner, t, p.ability, p.element, p.power, tmp.subVectors(t.pos, p.pos).clone(), null);
     }
   }

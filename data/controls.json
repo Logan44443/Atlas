@@ -17,6 +17,7 @@
     { "id": "block",        "label": "Block / counter (hold)", "group": "Bending", "keys": ["Mouse2"] },
     { "id": "target",       "label": "Cycle target",       "group": "Interface", "keys": ["Tab"] },
     { "id": "interact",     "label": "Interact",           "group": "Interface", "keys": ["KeyG"] },
+    { "id": "pvpFlag",      "label": "Toggle PvP flag",    "group": "Interface", "keys": ["KeyP"] },
     { "id": "freeCamera",   "label": "Debug free camera",  "group": "Interface", "keys": ["F2"] }
   ],
   "reserved": ["Escape", "F3", "F4", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"],

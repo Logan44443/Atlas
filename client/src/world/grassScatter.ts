@@ -56,7 +56,7 @@ export function scatterGrass(
       (P[a * 3 + 1] * (1 - tx) + P[(a + 1) * 3 + 1] * tx) * (1 - tz) +
       (P[(a + n) * 3 + 1] * (1 - tx) + P[(a + n + 1) * 3 + 1] * tx) * tz;
     nrm.set(N[a * 3], N[a * 3 + 1], N[a * 3 + 2]);
-    const gr = sampler.grassiness(y, nrm.y);
+    const gr = sampler.grassiness(y, nrm.y) * (1 - sampler.plazaAmount(cx * size + lx, cz * size + lz));
     if (gr < 0.05 || r1 > gr) continue;
     q.setFromUnitVectors(up, nrm.lerp(up, 0.6).normalize());
     const yaw = new Quaternion().setFromAxisAngle(up, r2 * Math.PI * 2);

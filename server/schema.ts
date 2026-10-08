@@ -27,6 +27,9 @@ export const EntityState = schema(
     /** attack wind-up 0..1 (dummies) */
     wu: 'float32',
     pvp: 'boolean',
+    fac: 'string',
+    role: 'string',
+    title: 'string',
   },
   'EntityState',
 );

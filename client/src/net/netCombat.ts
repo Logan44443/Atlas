@@ -4,6 +4,7 @@ import type { ElementId, Slot, StatusType } from '@shared/combat';
 import { createEntity, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import { NET, ROOM_NAME, type CorrectMsg, type JoinOptions, type MoveMsg, type V3, type WelcomeMsg } from '@shared/net';
 import { createPlayerEntity, PLAYER_SHAPE, type CombatHost } from '../game/combat/host';
+import { sideOf } from '@shared/factions';
 
 /** What the client reads from a replicated entity (see server/schema.ts). */
 interface EntityStateView {
@@ -28,6 +29,9 @@ interface EntityStateView {
   sh: boolean;
   wu: number;
   pvp: boolean;
+  fac: string;
+  role: string;
+  title: string;
 }
 
 interface WorldStateView {
@@ -85,6 +89,7 @@ export class NetCombat implements CombatHost {
   private pingT = 0;
   private closed = false;
   corrections: CorrectMsg[] = [];
+  notices: Array<{ text: string; warn?: boolean }> = [];
   onClose: (() => void) | null = null;
 
   private constructor(
@@ -103,6 +108,7 @@ export class NetCombat implements CombatHost {
     room.onMessage('ev', (evs: SimEvent[]) => this.queue.push(...evs));
     room.onMessage('imp', (v: V3) => this.me.pendingImpulse.add(new THREE.Vector3(v[0], v[1], v[2])));
     room.onMessage('correct', (m: CorrectMsg) => this.corrections.push(m));
+    room.onMessage('notice', (m: { text: string; warn?: boolean }) => this.notices.push(m));
     room.onMessage('pong', (m: { t: number; s: number }) => {
       const now = Date.now();
       this.rtt = now - m.t;
@@ -117,7 +123,13 @@ export class NetCombat implements CombatHost {
   }
 
   /** Join (or create) a shard. Rejects if no server answers within the timeout. */
-  static async connect(url: string, opts: JoinOptions, player: { swimming: boolean }, shardId?: string | null): Promise<NetCombat> {
+  static async connect(
+    url: string,
+    opts: JoinOptions,
+    who: { name: string; element: ElementId; faction: string },
+    player: { swimming: boolean },
+    shardId?: string | null,
+  ): Promise<NetCombat> {
     const client = new Client(url);
     const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('no shard server answered')), NET.connectTimeoutMs));
     const room = (await Promise.race([shardId ? client.joinById<WorldStateView>(shardId, opts) : client.joinOrCreate<WorldStateView>(ROOM_NAME, opts), timeout])) as Room<WorldStateView>;
@@ -125,7 +137,11 @@ export class NetCombat implements CombatHost {
       new Promise<WelcomeMsg>((res) => room.onMessage('welcome', res)),
       timeout,
     ]);
-    return new NetCombat(room, welcome, opts.name, opts.element, player);
+    const net = new NetCombat(room, welcome, who.name, who.element, player);
+    net.me.faction = who.faction;
+    net.me.side = sideOf(who.faction) ?? '';
+    net.me.level = welcome.level;
+    return net;
   }
 
   get serverNow(): number {
@@ -168,7 +184,9 @@ export class NetCombat implements CombatHost {
         const e =
           st.kind === 'player'
             ? createPlayerEntity(id, st.name, (st.el || null) as ElementId | null)
-            : createEntity({ id, name: st.name, kind: 'dummy', team: st.team, radius: 0.4, height: 2.2 });
+            : st.kind === 'npc'
+              ? createEntity({ id, name: st.name, kind: 'npc', team: st.team, role: st.role, title: st.title, element: (st.el || null) as ElementId | null, ...PLAYER_SHAPE })
+              : createEntity({ id, name: st.name, kind: 'dummy', team: st.team, radius: 0.4, height: 2.2 });
         e.pos.set(st.x, st.y, st.z);
         e.yaw = st.yaw;
         r = { entity: e, samples: [] };
@@ -187,7 +205,7 @@ export class NetCombat implements CombatHost {
       this.applyCommon(r.entity, st);
       r.entity.blocking = st.blk;
       r.entity.windup = st.wu;
-      if (st.kind === 'player' && st.el) r.entity.element = st.el as ElementId;
+      if (st.kind !== 'dummy' && st.el) r.entity.element = st.el as ElementId;
       if (st.kind === 'player') Object.assign(r.entity, PLAYER_SHAPE);
     });
     for (const id of [...this.remotes.keys()]) {
@@ -208,6 +226,8 @@ export class NetCombat implements CombatHost {
     e.maxChi = st.maxChi;
     e.dead = st.dead;
     e.pvp = st.pvp;
+    e.faction = st.fac;
+    e.side = sideOf(st.fac) ?? '';
     e.shield = st.sh ? (e.shield ?? { ...SHIELD_STUB }) : null;
     const want = st.st ? (st.st.split(',') as StatusType[]) : [];
     for (const k of [...e.statuses.keys()]) if (!want.includes(k)) e.statuses.delete(k);

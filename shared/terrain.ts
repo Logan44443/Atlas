@@ -25,6 +25,8 @@ export interface TerrainConfig {
   };
   biomes: { sandMaxHeight: number; grassMaxHeight: number; snowMinHeight: number; rockSlope: number };
   colors: Record<'sand' | 'grassLow' | 'grassHigh' | 'dirt' | 'rock' | 'rockDark' | 'snow' | 'seabed', string>;
+  /** Levelled sites (faction hubs, shrines). Height is the raw terrain at the centre. */
+  flats?: Array<{ x: number; z: number; radius: number; blend: number }>;
 }
 
 export type RGB = [number, number, number];
@@ -68,8 +70,26 @@ export class TerrainSampler {
     this.halfExtent = (cfg.worldChunks * cfg.chunkSize) / 2;
   }
 
+  private flatHeights: number[] = [];
+
   /** World-space height (metres) at x,z. */
   height(x: number, z: number): number {
+    let h = this.rawHeight(x, z);
+    const flats = this.cfg.flats;
+    if (flats) {
+      for (let i = 0; i < flats.length; i++) {
+        const f = flats[i];
+        const d = Math.hypot(x - f.x, z - f.z);
+        if (d >= f.radius + f.blend) continue;
+        if (this.flatHeights[i] === undefined) this.flatHeights[i] = Math.max(this.rawHeight(f.x, f.z), this.cfg.seaLevel + 2.5);
+        h = lerp(h, this.flatHeights[i], 1 - smoothstep(f.radius, f.radius + f.blend, d));
+      }
+    }
+    return h;
+  }
+
+  /** Height before levelling (natural terrain). */
+  rawHeight(x: number, z: number): number {
     const t = this.cfg.terrain;
     // Domain warp for more organic coastlines and ridges.
     const wx = x + this.nw(x / t.warpScale, z / t.warpScale) * t.warpAmount;
@@ -82,6 +102,7 @@ export class TerrainSampler {
     const mMask = smoothstep(t.mountainThreshold - 0.15, t.mountainThreshold + 0.25, continent * 0.5 + 0.5);
 
     let h = t.baseHeight + continent * t.continentAmplitude;
+
     h += hills * t.hillAmplitude * smoothstep(-2, 10, h);
     h += mRaw * t.mountainAmplitude * mMask;
     h += detail * t.detailAmplitude;
@@ -134,7 +155,22 @@ export class TerrainSampler {
     // Snow caps on flatter high ground.
     const snow = smoothstep(b.snowMinHeight - 6, b.snowMinHeight + 6, h + jitter * 8) * smoothstep(0.5, 0.75, ny);
     mixRGB(out, c.snow, snow, out);
+    // Packed-earth plazas on levelled sites.
+    const plaza = this.plazaAmount(x, z);
+    if (plaza > 0) mixRGB(out, c.dirt, plaza * 0.85, out);
     return out;
+  }
+
+  /** 0..1 inside a levelled site's plaza (hubs, shrines). */
+  plazaAmount(x: number, z: number): number {
+    const flats = this.cfg.flats;
+    if (!flats) return 0;
+    let a = 0;
+    for (const f of flats) {
+      const d = Math.hypot(x - f.x, z - f.z);
+      if (d < f.radius) a = Math.max(a, 1 - smoothstep(f.radius - 8, f.radius, d));
+    }
+    return a;
   }
 
   /** Low-frequency [-1,1] noise used to cluster props into forests / rock fields. */

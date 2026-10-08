@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 // Builds terrain LOD meshes and grass instances off the main thread.
-import worldData from '@data/world.json';
-import { TerrainSampler, type TerrainConfig } from '@shared/terrain';
+import { TerrainSampler } from '@shared/terrain';
+import { terrainConfig } from '@shared/factions';
 import { buildChunkMesh, type ChunkMeshData } from '@shared/chunkMesh';
 import { CHUNK_RES } from '@shared/world';
 import { scatterGrass, type GrassData } from './grassScatter';
@@ -25,7 +25,7 @@ export interface BuildResult {
   ms: number;
 }
 
-const sampler = new TerrainSampler(worldData as unknown as TerrainConfig);
+const sampler = new TerrainSampler(terrainConfig());
 
 self.onmessage = (e: MessageEvent<BuildRequest>) => {
   const t0 = performance.now();

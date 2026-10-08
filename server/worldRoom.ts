@@ -6,21 +6,34 @@ import { StateView } from '@colyseus/schema';
 import { Vector3 } from 'three';
 import worldData from '../data/world.json';
 import characterData from '../data/character.json';
-import { TerrainSampler, type TerrainConfig } from '../shared/terrain';
+import { TerrainSampler } from '../shared/terrain';
+import { terrainConfig } from '../shared/factions';
 import { CombatSim, CFG, createEntity, type SimEntity, type SimEvent } from '../shared/sim/combatSim';
 import { spawnDummies, updateDummy, type DummyBrain } from '../shared/sim/dummies';
+import { spawnNpcs, updateNpc, type NpcBrain } from '../shared/sim/npcs';
 import { elementContextAt, worldDays } from '../shared/clock';
 import { NET, type CastMsg, type JoinOptions, type MoveMsg, type WelcomeMsg, type CorrectMsg, type V3 } from '../shared/net';
-import { SLOTS, type ElementId, type Slot } from '../shared/combat';
+import { SLOTS, type Slot } from '../shared/combat';
 import { EntityState, WorldState } from './schema';
+import { factionById, hubSpawn, PVP } from '../shared/factions';
+import { validateName } from '../shared/names';
+import accountData from '../data/accounts.json';
+import type { Account, CharacterRow, Store } from './db/store';
 
-const ELEMENTS: ElementId[] = ['fire', 'water', 'earth', 'air'];
+interface AuthResult {
+  account: Account;
+  character: CharacterRow;
+}
+
+/** Characters currently in any shard (one session per character). */
+const online = new Map<string, string>();
+
 const CAP = characterData.capsule;
 const PLAYER_SHAPE = { radius: CAP.radius + 0.1, height: (CAP.halfHeight + CAP.radius) * 2 };
 const CHUNK = worldData.chunkSize;
 const HALF_WORLD = (worldData.worldChunks * CHUNK) / 2;
 const DEV = process.env.NODE_ENV !== 'production';
-const sampler = new TerrainSampler(worldData as unknown as TerrainConfig);
+const sampler = new TerrainSampler(terrainConfig());
 const groundAt = (x: number, z: number) => sampler.height(x, z);
 
 interface PlayerData {
@@ -35,6 +48,8 @@ interface PlayerData {
   aim: Vector3;
   seq: number;
   deadT: number;
+  characterId: string;
+  pvpToggleT: number;
 }
 
 export function cleanName(raw: unknown): string {
@@ -46,9 +61,11 @@ const arr = (v: { x: number; y: number; z: number }): V3 => [v.x, v.y, v.z];
 const finite = (a: unknown, n = 3): a is number[] => Array.isArray(a) && a.length === n && a.every((x) => Number.isFinite(x));
 
 export class WorldRoom extends Room<WorldState> {
+  static store: Store;
   maxClients = NET.maxClients;
   private sim = new CombatSim(groundAt);
   private brains: DummyBrain[] = [];
+  private npcs: NpcBrain[] = [];
   private players = new Map<string, PlayerData>();
   private spawn = new Vector3(worldData.spawn.x, 0, worldData.spawn.z);
 
@@ -59,22 +76,34 @@ export class WorldRoom extends Room<WorldState> {
     this.setPatchRate(1000 / NET.patchRate);
     this.spawn.y = Math.max(groundAt(this.spawn.x, this.spawn.z), worldData.seaLevel);
     this.brains = spawnDummies(this.sim, this.spawn, groundAt);
-    for (const b of this.brains) this.state.entities.set(b.entity.id, this.newState(b.entity));
+    this.npcs = spawnNpcs(this.sim, groundAt);
+    for (const e of this.sim.entities.values()) this.state.entities.set(e.id, this.newState(e));
 
     this.onMessage('move', (c, m: MoveMsg) => this.onMove(c, m));
     this.onMessage('cast', (c, m: CastMsg) => this.onCast(c, m));
-    this.onMessage('profile', (c, m: Partial<JoinOptions>) => {
+    // Display name changes from the settings menu. Element and faction are permanent per character.
+    this.onMessage('profile', async (c, m: { name?: string }) => {
       const p = this.players.get(c.sessionId);
-      if (!p || !m) return;
-      if (m.name !== undefined) p.entity.name = cleanName(m.name);
-      if (m.element && ELEMENTS.includes(m.element) && m.element !== p.entity.element) {
-        p.entity.element = m.element;
-        p.entity.cooldowns.clear();
+      if (!p || typeof m?.name !== 'string') return;
+      const name = m.name.trim();
+      const err = validateName(name);
+      if (err) return c.send('notice', { text: err, warn: true });
+      try {
+        await WorldRoom.store.renameCharacter(p.characterId, name);
+        p.entity.name = name;
+      } catch (e) {
+        c.send('notice', { text: (e as Error).message, warn: true });
       }
     });
     this.onMessage('pvp', (c, on: boolean) => {
       const p = this.players.get(c.sessionId);
-      if (p) p.entity.pvp = !!on;
+      if (!p) return;
+      const nowS = Date.now() / 1000;
+      if (on && p.entity.level < PVP.flagMinLevel) return c.send('notice', { text: `PvP flag unlocks at level ${PVP.flagMinLevel}`, warn: true });
+      if (nowS - p.pvpToggleT < PVP.flagToggleCooldown) return c.send('notice', { text: 'You changed your PvP flag too recently', warn: true });
+      p.pvpToggleT = nowS;
+      p.entity.pvp = !!on;
+      c.send('notice', { text: on ? 'PvP flag raised: flagged players can attack you in the Wilds' : 'PvP flag lowered' });
     });
     // Dev builds let tests and the free camera move players anywhere.
     if (DEV) {
@@ -88,31 +117,63 @@ export class WorldRoom extends Room<WorldState> {
     }
     this.onMessage('ping', (c, t: number) => c.send('pong', { t, s: Date.now() }));
     this.setSimulationInterval((ms) => this.tick(Math.min(ms, 250) / 1000), 1000 / NET.tickRate);
+    this.clock.setInterval(() => {
+      for (const p of this.players.values()) void this.save(p);
+    }, accountData.saveEverySeconds * 1000);
   }
 
-  onJoin(client: Client, options: JoinOptions): void {
-    const element = ELEMENTS.includes(options?.element) ? options.element : 'fire';
-    // Spread arrivals around the spawn so people don't stack.
-    const a = Math.random() * Math.PI * 2;
-    const r = 2 + Math.random() * 3;
-    const pos = new Vector3(this.spawn.x + Math.cos(a) * r, 0, this.spawn.z + 4 + Math.sin(a) * r);
+  async onAuth(_client: Client, options: JoinOptions): Promise<AuthResult> {
+    const store = WorldRoom.store;
+    const account = options?.token ? await store.accountForToken(String(options.token)) : null;
+    if (!account) throw new Error('Please sign in again');
+    const character = options?.characterId ? await store.getCharacter(String(options.characterId)) : null;
+    if (!character || character.accountId !== account.id) throw new Error('No such character');
+    if (online.has(character.id)) throw new Error(`${character.name} is already in the world`);
+    return { account, character };
+  }
+
+  onJoin(client: Client, _options: JoinOptions, auth: AuthResult): void {
+    const c = auth.character;
+    online.set(c.id, client.sessionId);
+    const faction = factionById(c.faction);
+    // Returning characters come back where they logged out; new ones start at their hub.
+    let pos: Vector3;
+    if (c.pos && Math.abs(c.pos[0]) < HALF_WORLD && Math.abs(c.pos[2]) < HALF_WORLD) pos = new Vector3(c.pos[0], 0, c.pos[2]);
+    else {
+      const sp = hubSpawn(c.faction);
+      pos = new Vector3(sp.x, 0, sp.z);
+    }
     pos.y = Math.max(groundAt(pos.x, pos.z), worldData.seaLevel);
-    const entity = createEntity({ id: client.sessionId, name: cleanName(options?.name), kind: 'player', team: 'players', element, pos, ...PLAYER_SHAPE });
+    const entity = createEntity({
+      id: client.sessionId, name: c.name, kind: 'player', team: 'players', element: c.element, pos, level: c.level,
+      faction: c.faction, side: faction?.side ?? '', ...PLAYER_SHAPE,
+    });
+    entity.protectedUntil = this.sim.time + PVP.spawnProtectionSeconds;
     this.sim.add(entity);
     this.players.set(client.sessionId, {
       entity, last: pos.clone(), lastT: Date.now(), allowance: 0, lastDodge: -1e9, invSince: -1, swimming: false, aim: new Vector3(0, 0, 1), seq: 0, deadT: 0,
+      characterId: c.id, pvpToggleT: -1e9,
     });
     const st = this.newState(entity);
     this.state.entities.set(entity.id, st);
     client.view = new StateView();
     client.view.add(st);
-    const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: Date.now(), tickRate: NET.tickRate };
+    const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: Date.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level };
     client.send('welcome', welcome);
-    console.log(`[${this.roomId}] ${entity.name} joined as ${element} (${this.clients.length}/${this.maxClients})`);
+    console.log(`[${this.roomId}] ${entity.name} (${c.faction} ${c.element}) joined (${this.clients.length}/${this.maxClients})`);
   }
 
-  onLeave(client: Client): void {
+  private save(p: PlayerData): Promise<void> {
+    const e = p.entity;
+    return WorldRoom.store.saveCharacter(p.characterId, { pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)] }).catch((err) => console.error('[db] save failed', err));
+  }
+
+  async onLeave(client: Client): Promise<void> {
     const p = this.players.get(client.sessionId);
+    if (p) {
+      online.delete(p.characterId);
+      await this.save(p);
+    }
     this.players.delete(client.sessionId);
     this.sim.remove(client.sessionId);
     this.state.entities.delete(client.sessionId);
@@ -189,6 +250,7 @@ export class WorldRoom extends Room<WorldState> {
     for (const p of this.players.values()) this.sim.updateAim(p.entity, p.aim);
     this.sim.update(dt);
     for (const b of this.brains) updateDummy(b, dt, this.sim, groundAt);
+    for (const b of this.npcs) updateNpc(b, dt, this.sim, groundAt);
     const events = this.sim.drain();
 
     for (const p of this.players.values()) {
@@ -198,9 +260,11 @@ export class WorldRoom extends Room<WorldState> {
         p.deadT += dt;
         if (p.deadT > 3) {
           p.deadT = 0;
-          e.pos.copy(this.spawn);
-          p.last.copy(this.spawn);
+          const sp = hubSpawn(e.faction);
+          e.pos.set(sp.x, Math.max(groundAt(sp.x, sp.z), worldData.seaLevel), sp.z);
+          p.last.copy(e.pos);
           this.sim.revive(e);
+          e.protectedUntil = this.sim.time + PVP.spawnProtectionSeconds;
           events.push(...this.sim.drain());
         }
       }
@@ -287,6 +351,8 @@ export class WorldRoom extends Room<WorldState> {
     const st = new EntityState();
     st.id = e.id;
     st.kind = e.kind;
+    st.role = e.role ?? '';
+    st.title = e.title ?? '';
     this.writeState(st, e);
     return st;
   }
@@ -312,5 +378,6 @@ export class WorldRoom extends Room<WorldState> {
     st.sh = !!e.shield;
     st.wu = r(e.windup);
     st.pvp = e.pvp;
+    st.fac = e.faction;
   }
 }

@@ -2,6 +2,7 @@ import type * as THREE from 'three/webgpu';
 import type { Slot } from '@shared/combat';
 import { CombatSim, createEntity, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import { spawnDummies, updateDummy, type DummyBrain } from '@shared/sim/dummies';
+import { spawnNpcs, updateNpc, type NpcBrain } from '@shared/sim/npcs';
 import characterData from '@data/character.json';
 
 /** Where combat rules run: in this tab (offline) or on the shard server (online). */
@@ -30,6 +31,7 @@ export class LocalCombat implements CombatHost {
   readonly sim: CombatSim;
   readonly me: SimEntity;
   readonly brains: DummyBrain[];
+  readonly npcs: NpcBrain[];
   private reviveT = -1;
 
   constructor(name: string, element: SimEntity['element'], spawn: { x: number; z: number }, private groundAt: (x: number, z: number) => number) {
@@ -37,6 +39,7 @@ export class LocalCombat implements CombatHost {
     this.me = createPlayerEntity('player', name, element);
     this.sim.add(this.me);
     this.brains = spawnDummies(this.sim, spawn, groundAt);
+    this.npcs = spawnNpcs(this.sim, groundAt);
   }
 
   get entities() {
@@ -54,6 +57,7 @@ export class LocalCombat implements CombatHost {
     this.sim.updateAim(this.me, aim);
     this.sim.update(dt);
     for (const b of this.brains) updateDummy(b, dt, this.sim, this.groundAt);
+    for (const b of this.npcs) updateNpc(b, dt, this.sim, this.groundAt);
     // No death penalty offline: get back up after a moment.
     if (this.me.dead && this.reviveT < 0) this.reviveT = 2;
     if (this.reviveT >= 0) {

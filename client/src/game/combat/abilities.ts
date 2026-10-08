@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { canBend, type AbilityDef, type ElementContext, type ElementId, type ElementKit, type Slot } from '@shared/combat';
-import { CFG, KITS, center, isEnemy, type SimEntity } from '@shared/sim/combatSim';
+import { CFG, KITS, center, canHarm, type SimEntity } from '@shared/sim/combatSim';
 import type { Controls } from '../../engine/settings';
 import type { Player } from '../player';
 import { gestureFor, type GestureStyle } from './combatView';
@@ -85,7 +85,7 @@ export class PlayerAbilities {
   private enemies(): SimEntity[] {
     const me = this.me();
     const out: SimEntity[] = [];
-    for (const e of this.entities()) if (!e.dead && isEnemy(me, e)) out.push(e);
+    for (const e of this.entities()) if (!e.dead && canHarm(me, e)) out.push(e);
     return out;
   }
 

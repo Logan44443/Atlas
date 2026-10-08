@@ -42,6 +42,15 @@ export class Physics {
     this.terrain.delete(key);
   }
 
+  /** Static box (walls, buildings), rotated by `yaw` around Y. */
+  addStaticBox(x: number, y: number, z: number, hx: number, hy: number, hz: number, yaw = 0): RAPIER.Collider {
+    const desc = RAPIER.ColliderDesc.cuboid(hx, hy, hz)
+      .setTranslation(x, y, z)
+      .setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) })
+      .setFriction(0.6);
+    return this.world.createCollider(desc);
+  }
+
   hasTerrainAt(x: number, z: number, size: number): boolean {
     return this.terrain.has(chunkKey(Math.floor(x / size), Math.floor(z / size)));
   }

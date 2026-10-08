@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import worldData from '@data/world.json';
-import { TerrainSampler, type TerrainConfig } from '@shared/terrain';
+import { TerrainSampler } from '@shared/terrain';
+import { terrainConfig } from '@shared/factions';
 import { GameRenderer } from './engine/renderer';
 import { Input } from './engine/input';
 import { FlyCamera } from './engine/flyCamera';
@@ -29,6 +30,14 @@ import characterData from '@data/character.json';
 import { elementContextAt, worldDays } from '@shared/clock';
 import { NetCombat, defaultServerUrl } from './net/netCombat';
 import { RemotePlayers } from './game/remotePlayers';
+import { AccountClient, type Character } from './net/account';
+import type { ElementId } from '@shared/combat';
+import { CharacterScreen } from './ui/characterScreen';
+import { Hubs } from './world/hubs';
+import { hubSpawn, sideOf, factionById, PVP, type FactionId } from '@shared/factions';
+import { ZoneHud } from './ui/zoneHud';
+import { NpcDialog } from './ui/dialog';
+import { keyLabel } from './engine/settings';
 import { Hud } from './ui/hud';
 import { DebugOverlay } from './ui/debug';
 import { ChunkMinimap } from './ui/minimap';
@@ -62,7 +71,7 @@ async function main() {
   let presetReason = qualitySetting === 'auto' ? `auto: ${detected.reason}` : 'manual';
   let q: QualityPreset = getPreset(presetName);
 
-  const sampler = new TerrainSampler(worldData as unknown as TerrainConfig);
+  const sampler = new TerrainSampler(terrainConfig());
   const sky = new Sky();
   scene.add(sky.mesh);
   const dayNight = new DayNight(scene, sky);
@@ -81,6 +90,8 @@ async function main() {
   await streamer.init();
   scene.add(streamer.group);
   const groundAt = (x: number, z: number) => streamer.heightAt(x, z);
+  const hubs = new Hubs((x, z) => sampler.height(x, z), physics);
+  scene.add(hubs.group);
 
   function applyQuality() {
     gr.applyQuality(q);
@@ -104,9 +115,77 @@ async function main() {
   settings.save();
   const controls = new Controls(input, settings);
 
-  // Player.
+  // Title screen: account (guest by default) and character choice.
+  const params = new URLSearchParams(location.search);
+  setLoading('Finding a shard server…', 0.25);
+  const account = new AccountClient();
+  await account.start(params.has('offline'));
+  // Dev/test shortcut: ?char=Name&el=fire&fac=sentinel picks (or creates) that character directly.
+  let picked: Character | undefined;
+  const quick = params.get('char');
+  if (quick) {
+    picked = account.characters.find((c) => c.name.toLowerCase() === quick.toLowerCase());
+    if (!picked) {
+      try {
+        picked = await account.create(quick, (params.get('el') ?? 'fire') as ElementId, (params.get('fac') ?? 'sentinel') as FactionId);
+      } catch (e) {
+        console.warn(`[account] quick character failed: ${(e as Error).message}`);
+      }
+    }
+  }
+  if (!picked) {
+    const charScreen = new CharacterScreen(account);
+    picked = await charScreen.pick();
+    charScreen.close();
+  }
+  const character = picked;
+  settings.data.name = character.name;
+  settings.data.element = character.element;
+  settings.save();
+
+  // Multiplayer: join a shard with this character if the server answers, otherwise play offline.
   spawn.y = Math.max(groundAt(spawn.x, spawn.z), worldData.seaLevel);
-  const player = new Player(physics, controls, spawn, groundAt, worldData.chunkSize);
+  const who = { name: character.name, element: character.element, faction: character.faction };
+  const offlineSpawn = () => {
+    if (character.pos) return new THREE.Vector3(character.pos[0], 0, character.pos[2]);
+    const h = hubSpawn(character.faction);
+    return new THREE.Vector3(h.x, 0, h.z);
+  };
+  let netStatus = account.online ? 'connecting…' : 'offline (no server)';
+  let host: CombatHost;
+  let start: THREE.Vector3;
+  const makeLocal = (at: THREE.Vector3) => {
+    const lc = new LocalCombat(who.name, who.element, spawn, groundAt);
+    lc.me.faction = who.faction;
+    lc.me.side = sideOf(who.faction) ?? '';
+    lc.me.level = character.level;
+    lc.me.pos.copy(at);
+    return lc;
+  };
+  const swimState = { swimming: false };
+  if (account.online && account.token) {
+    setLoading(`Joining a shard as ${character.name}…`, 0.28);
+    try {
+      const net = await NetCombat.connect(defaultServerUrl(), { token: account.token, characterId: character.id }, who, swimState, params.get('shard'));
+      host = net;
+      netStatus = `shard ${net.shard}`;
+      start = net.me.pos.clone();
+      console.info(`[net] joined ${netStatus} as ${net.me.id}`);
+    } catch (err) {
+      netStatus = `offline (${(err as Error)?.message ?? 'no server'})`;
+      console.info(`[net] ${netStatus}`);
+      start = offlineSpawn();
+      host = makeLocal(start);
+    }
+  } else {
+    start = offlineSpawn();
+    host = makeLocal(start);
+  }
+  start.y = Math.max(groundAt(start.x, start.z), worldData.seaLevel);
+
+  // Player.
+  const player = new Player(physics, controls, start, groundAt, worldData.chunkSize);
+  Object.defineProperty(swimState, 'swimming', { get: () => player.swimming });
   let avatar = new Avatar(settings.data.element);
   const nameplate = new Nameplate(settings.data.name);
   avatar.root.add(nameplate.sprite);
@@ -115,7 +194,6 @@ async function main() {
   // Combat. The rules live in shared/sim; offline they run in this tab.
   const vfx = new Vfx();
   scene.add(vfx.group);
-  let host: CombatHost = new LocalCombat(settings.data.name, settings.data.element, spawn, groundAt);
   const elementContext = () =>
     elementContextAt(sampler, worldData, CFG.elements.water.nearWaterMeters, player.renderPos, dayNight.days, player.swimming, player.grounded, groundAt);
   const abilities = new PlayerAbilities(
@@ -131,6 +209,17 @@ async function main() {
   scene.add(view.group);
   const hud = new Hud(settings);
   const remotes = new RemotePlayers(scene, view);
+  const zoneHud = new ZoneHud();
+  const dialog = new NpcDialog();
+  function togglePvp() {
+    const me = host.me;
+    if (host instanceof NetCombat) host.setPvp(!me.pvp);
+    else if (!me.pvp && me.level < PVP.flagMinLevel) zoneHud.show(`PvP flag unlocks at level ${PVP.flagMinLevel}`, true);
+    else {
+      me.pvp = !me.pvp;
+      zoneHud.show(me.pvp ? 'PvP flag raised' : 'PvP flag lowered');
+    }
+  }
   const dummyViews = new Map<string, DummyView>();
   const yawDirV = new THREE.Vector3();
   function yawDir(yaw: number) {
@@ -192,34 +281,32 @@ async function main() {
         dummyViews.get(e.target)?.shake(Math.hypot(...e.v));
         break;
       case 'respawn':
-        if (e.target === me.id) player.teleport(spawn.x, spawn.z);
+        if (e.target === me.id) {
+          if (host.online) player.teleport(me.pos.x, me.pos.z);
+          else {
+            const h = hubSpawn(character.faction);
+            player.teleport(h.x, h.z);
+          }
+        }
         break;
     }
   }
 
-  // Multiplayer: join a shard if a server answers, otherwise keep playing offline.
-  const params = new URLSearchParams(location.search);
-  let netStatus = params.has('offline') ? 'offline (?offline)' : 'connecting…';
   function goOffline(reason: string) {
     netStatus = `offline (${reason})`;
-    host = new LocalCombat(settings.data.name, settings.data.element, spawn, groundAt);
+    host = makeLocal(player.renderPos.clone());
     abilities.setElement(settings.data.element);
     console.info(`[net] ${netStatus}`);
   }
-  async function connect() {
-    try {
-      const net = await NetCombat.connect(defaultServerUrl(), { name: settings.data.name, element: settings.data.element }, player, params.get('shard'));
-      host = net;
-      abilities.setElement(settings.data.element);
-      netStatus = `shard ${net.shard}`;
-      net.onClose = () => goOffline('disconnected');
-      console.info(`[net] joined ${netStatus} as ${net.me.id}`);
-      if (!loading) player.teleport(net.me.pos.x, net.me.pos.z);
-    } catch (err) {
-      goOffline((err as Error)?.message ?? 'no server');
-    }
-  }
-  const netReady = params.has('offline') ? Promise.resolve() : connect();
+  if (host instanceof NetCombat) host.onClose = () => goOffline('disconnected');
+  const netReady = Promise.resolve();
+
+  // Offline characters remember where they were.
+  const saveLocal = () => {
+    if (!host.online && !account.online) account.saveLocalPosition(character.id, [player.renderPos.x, player.renderPos.y, player.renderPos.z], settings.data.name);
+  };
+  setInterval(saveLocal, 10_000);
+  addEventListener('beforeunload', saveLocal);
 
   /** Move the local player anywhere (tests, debugging); dev shards accept it. */
   function tp(x: number, z: number) {
@@ -228,17 +315,10 @@ async function main() {
   }
 
   settings.onChange((s) => {
+    if (s.name === host.me.name) return;
     nameplate.set(s.name);
     host.me.name = s.name;
-    if (host instanceof NetCombat) host.room.send('profile', { name: s.name, element: s.element });
-    if (s.element !== abilities.element) {
-      abilities.setElement(s.element);
-      scene.remove(avatar.root);
-      avatar.root.remove(nameplate.sprite);
-      avatar = new Avatar(s.element);
-      avatar.root.add(nameplate.sprite);
-      scene.add(avatar.root);
-    }
+    if (host instanceof NetCombat) host.room.send('profile', { name: s.name });
   });
 
   const tpc = new ThirdPersonCamera(camera, input, settings, physics, groundAt);
@@ -255,6 +335,15 @@ async function main() {
     getQuality: () => qualitySetting,
     setQuality,
     onOpenChange: () => updateHint(),
+    characterInfo: () => {
+      const f = factionById(character.faction);
+      return `${character.name} · ${character.element} · ${f?.name ?? character.faction}`;
+    },
+    onSwitchCharacter: () => {
+      saveLocal();
+      if (host instanceof NetCombat) host.leave();
+      location.reload();
+    },
   });
 
   // "Click to play" hint + crosshair.
@@ -280,7 +369,7 @@ async function main() {
   Object.assign(window, {
     __fw: {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
-      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady,
+      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs,
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -328,6 +417,12 @@ async function main() {
         dayNight.days = worldDays(host.serverNow);
       }
       remotes.update(dt, host.entities, host.me.id);
+      if (host instanceof NetCombat) for (const n of host.notices.splice(0)) zoneHud.show(n.text, n.warn);
+      zoneHud.pvp = me.pvp;
+      zoneHud.update(dt, player.renderPos.x, player.renderPos.z);
+      const interactKey = settings.data.bindings.interact?.[0];
+      dialog.update(dialog.nearest(host.entities.values(), player.renderPos.x, player.renderPos.z), controls.pressed('interact'), interactKey ? keyLabel(interactKey) : 'Interact');
+      if (controls.pressed('pvpFlag')) togglePvp();
       syncEntityViews();
       for (const v of dummyViews.values()) v.update(dt);
       view.update(dt);
@@ -361,7 +456,7 @@ async function main() {
       if (streamer.nearReady() && physics.terrainColliderCount > 0) {
         loading = false;
         streamer.applyBudget = 3;
-        player.teleport(host.me.pos.x || spawn.x, host.me.pos.z || spawn.z);
+        player.teleport(start.x, start.z);
         gr.render();
         document.getElementById('loading')?.classList.add('done');
         updateHint();

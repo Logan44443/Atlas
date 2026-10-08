@@ -1,0 +1,16 @@
+{
+  "_comment": "Zones and PvP rules (DESIGN section 5). Safe zones are the faction hubs (factions.json safeRadius). Contested territories are always PvP; capture comes in Phase 11.",
+  "contested": [
+    { "id": "ember_shrine", "name": "Ember Shrine", "x": -960, "z": 320, "radius": 120, "flatRadius": 22 },
+    { "id": "tide_shrine", "name": "Tide Shrine", "x": 800, "z": -140, "radius": 120, "flatRadius": 22 },
+    { "id": "stone_shrine", "name": "Stone Shrine", "x": 180, "z": 500, "radius": 120, "flatRadius": 22 }
+  ],
+  "pvp": {
+    "flagMinLevel": 10,
+    "flaggedXpBonus": 0.25,
+    "lowLevelGap": 10,
+    "lowLevelDamageScale": 0.5,
+    "spawnProtectionSeconds": 10,
+    "flagToggleCooldown": 10
+  }
+}
