@@ -288,3 +288,29 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f1c; col
   background: rgba(10, 14, 24, 0.75); color: var(--ink); font-size: 13px; text-align: center; pointer-events: none; }
 .camp-place .warn { color: #ff8a7a; }
 .camp-prompt.hidden, .camp-place.hidden { display: none; }
+
+/* Phase 10: pets panel, trust game, boss bar, announcements */
+.pets .p-fed { height: 6px; border-radius: 3px; background: #10141f; overflow: hidden; margin-top: 4px; }
+.pets .p-fed span { display: block; height: 100%; }
+.pets .p-empty { color: var(--muted); margin: 14px 4px; line-height: 1.5; }
+.trust { position: fixed; left: 50%; top: 64%; transform: translateX(-50%); z-index: 30; width: min(420px, calc(100vw - 32px)); padding: 12px 14px;
+  border-radius: 10px; background: rgba(12, 16, 26, 0.88); border: 1px solid #2c344a; color: var(--ink); text-align: center; pointer-events: none; }
+.trust.hidden { display: none; }
+.trust b { display: block; margin-bottom: 8px; }
+.trust small { color: var(--muted); }
+.trust .t-bar { position: relative; height: 18px; border-radius: 9px; background: #1a2030; border: 1px solid #2c344a; margin-bottom: 6px; transition: box-shadow 0.2s; }
+.trust .t-bar.ok { box-shadow: 0 0 14px #6bbf5f; }
+.trust .t-zone { position: absolute; top: 0; bottom: 0; background: rgba(107, 191, 95, 0.55); border-radius: 9px; }
+.trust .t-mark { position: absolute; top: -4px; bottom: -4px; width: 4px; margin-left: -2px; background: #ffd76a; border-radius: 2px; }
+.announce { position: fixed; top: 14%; left: 50%; transform: translateX(-50%); z-index: 17; padding: 10px 22px; border-radius: 10px; pointer-events: none;
+  background: rgba(40, 18, 8, 0.82); border: 1px solid #c99a2e; color: #ffd76a; font-weight: 700; font-size: 18px; text-align: center; max-width: calc(100vw - 32px);
+  transition: opacity 0.4s; }
+.announce.hidden { opacity: 0; }
+.boss-bar { position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 16; width: min(520px, calc(100vw - 32px)); text-align: center; pointer-events: none; color: var(--ink); }
+.boss-bar.hidden { display: none; }
+.boss-bar .b-name { font-weight: 700; text-shadow: 0 1px 3px #000; }
+.boss-bar .b-name small, .boss-bar > small { color: var(--muted); font-weight: 400; }
+.boss-bar .b-track { height: 10px; border-radius: 5px; background: rgba(10, 12, 20, 0.8); border: 1px solid #5a2a20; overflow: hidden; margin: 4px 0 2px; }
+.boss-bar .b-track span { display: block; height: 100%; background: linear-gradient(90deg, #b8321f, #ff7a3c); }
+.dialog .quest-line { color: #9fc6e8; }
+.tame-hint { top: 63%; color: #b6ffc2; }

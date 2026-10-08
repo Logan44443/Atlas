@@ -32,7 +32,14 @@ This file covers architecture, layout, conventions and the current phase. Update
   placement ghost, chest storage, campfire respawn, steam vents, element shrine XP, raid windows with Earth bonus,
   24 h burn-down, PostgreSQL `structures`). Crew bases and crew-set raid windows move to Phase 11 with crews.
   Verified with `scripts/building-check.ts` and `scripts/phase9-test.mjs`.
-- **Phase 10 Pets**: next.
+- **Phase 10 Pets + wildlife**: done (wildlife dens with 9 species that give XP and loot, common taming with food +
+  trust game, Beastkeeper quests for rare pets behind mini bosses, 3 world bosses + 4 legendary world bosses with
+  telegraphed moves, shared rewards, Bond Trial with pity, pets that follow/fight/level/get hungry, ground, flying and
+  swimming mounts, pets panel `O`, ride `H`). Same PR: solid trees and boulders (player, projectiles, lightning),
+  bending marks on what bending hits, and hub NPCs that give advice fitting the player. Verified with
+  `scripts/pets-check.ts` and `scripts/phase10-test.mjs`.
+- **Phase 11 Territory wars, crews, polish, deployment**: next (crew bases + crew raid windows from Phase 9 too).
+- bob prefers several phases/features bundled into one PR rather than one PR per phase.
 - README.md is owned by a separate thread: don't edit it from build threads.
 
 ## Run it
@@ -55,6 +62,8 @@ node scripts/phase7-test.mjs       # party invite, steam combo, shared XP, disco
 node scripts/phase8-test.mjs       # Healing quest online, night-only Bloodbending, every other art offline
 npx tsx scripts/building-check.ts  # placement/inventory/raid/burn/crafting rules without a browser
 node scripts/phase9-test.mjs       # gather, channel, ally mud, build a camp with the ghost, chest, raid window, reload, offline camp
+npx tsx scripts/pets-check.ts      # solid props, dens, creature XP, taming, hunger, mounts, boss rewards, Bond Trial, advice
+node scripts/phase10-test.mjs      # advice, walk into a tree, scorch mark, hunt, tame, pets panel, ride, boss + Bond Trial, offline flying mount
 ```
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
@@ -63,7 +72,10 @@ URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?n
 `smoke.mjs` adds it by default).
 In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag, `K` mastery tree,
 `I` invite the player in front of you, `Y`/`N` answer an invite, `B` camp panel (bag/build/chest/forge), `C` channel
-(bend-craft), `G` also gathers at resource nodes. Dev shards accept `dev:xp`, `dev:clock`, `dev:raid`, `dev:give`, `dev:clearCamp`.
+(bend-craft), `G` also gathers at resource nodes and tames the wild animal in front of you (needs food), `O` pets panel,
+`H` ride your pet. Dev shards accept `dev:xp`, `dev:clock`, `dev:raid`, `dev:give`, `dev:clearCamp`, `dev:boss`
+(`{id, here, hp}`), `dev:bond` (force the Bond Trial roll) and `dev:pet` (put a pet in your stable); `LocalCombat`
+has the same as `devBoss`/`devBond`/`devPet`.
 
 ## Stack (fixed by design)
 
@@ -83,11 +95,15 @@ client/              Vite root (index.html, src/, public/)
   src/game/remotePlayers.ts   avatars + nameplates for other players
   src/world/hubs.ts  faction hub + shrine buildings (merged geometry, instanced lanterns, box colliders)
   src/world/campView.ts   StructureView (camp pieces: merged primitives + Rapier boxes) and ResourceView (instanced nodes)
+  src/world/marks.ts BendingMarks: per-element instanced decals on trunks, boulders and terrain where bending lands
+  src/game/creatureView.ts   creatures, bosses and pets (primitive bodies by shape, walk/wing/wind-up anims, HP bars, rider seat)
+  src/game/combat/telegraphs.ts   boss danger zones (ring/cone/lane) that fill until the move lands
   src/net/           NetCombat: Colyseus client, entity mirror + interpolation, move/cast messages
   src/net/account.ts AccountClient: guest/register/login, character list (offline: localStorage roster)
   src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog,
                      progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), artsUi (arts panel + quest compass),
-                     buildUi (camp panel, placement ghost, gather/channel prompts), CSS
+                     buildUi (camp panel, placement ghost, gather/channel prompts), petsUi (pets panel, trust game, boss bar,
+                     announcements), CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -106,6 +122,10 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   building.ts        pieces, inventories, Camps (placement rules, damage + raid windows, burn-down), snapping
   crafting.ts        CraftRules: gather, channel (environment + ally combos), forge
   campRules.ts       milestone XP, shrine bonus, steam vents, campfire respawn (shared by both authorities)
+  props.ts           deterministic tree/rock scatter per chunk (build script + runtime) and Obstacles (solid trunks/boulders)
+  sim/wildlife.ts    dens, creature AI, bosses (schedule, phases, telegraphed moves, rewards), Bond Trial spirits
+  pets.ts, petsState.ts   pet defs, taming/trust, feeding/hunger, pet AI, mounts, Bond Trial results, Beastkeeper quests
+  advice.ts          what hub NPCs tell this player (hunting grounds, mastery points, next art, bosses, pets, raids)
   progression.ts     XP curve, kill/discovery rewards (XpRules), mastery validation, Mods + modKit()
   clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
   net.ts             wire protocol types (move/cast/welcome/correct/events)
@@ -133,6 +153,9 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   mastery.json       mastery trees (3 branches x 5 skills per element) and tier unlocks
   partyCombos.json   party combo pairs (steam, magma, firestorm, blizzard, mud, sandstorm)
   arts.json          Special Arts: level, master + camp spot, quest steps, the art's ability, glider/flight tuning
+  wildlife.json      den grid, activation radii, creature level by hub distance, the 9 species (temper, attack, loot, tame)
+  bosses.json        mini/world/legendary bosses (spot, schedule, HP per player, phases), boss moves, rewards, Bond Trial
+  pets/*.json        rules (hunger, food, trust game, follow/assist) and common/rare/legendary pet defs (attack, mount, aura)
 scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
 docs/DESIGN.md       game design (keep in sync)
 ```
@@ -198,6 +221,26 @@ docs/DESIGN.md       game design (keep in sync)
   `structDel`); clients keep a mirror `Camps` so the placement ghost runs the same `check()`. Materials live in
   `Progress.inv`, chest contents on the chest structure. `CraftRules` keeps channel windows and cooldowns per
   room/tab. Offline camps are saved to localStorage `fw.camps`.
+- **Solid props**: `shared/props.ts` `chunkProps()` is the one scatter used by `build-world.ts` (chunk `.json`) and at
+  runtime; `obstacleOf()` turns a pine/broadleaf/rock into a cylinder (`data/props.json` `solid`). The client adds
+  Rapier cylinders for near chunks (`Physics.addPropChunk`); the sim asks `obstacleAt` (an LRU `Obstacles` per process)
+  so projectiles end and lightning stops on trunks. Changing `props.json` changes the world hash: rebuild the world.
+- **Wildlife/bosses**: `Wildlife` (shared/sim/wildlife.ts) is owned by the authority next to the sim: `update()` fills
+  and empties dens around players once a second and runs creature/boss brains; `onDeath()` returns `WildNews` (xp,
+  loot, notices, announcements, bond/rare/trial) that the host applies. Creature XP goes through `XpRules` (bounty);
+  boss XP comes only from `onDeath` (entity.damagers, credited to pet owners). Boss moves are ordinary `AbilityDef`s
+  run with `sim.perform()` after a wind-up; the `tele` event paints the danger zone. Dead brains linger 3 s so the
+  host can read them before cleanup. Boss schedules use the world clock (shifted by `dev:clock` online).
+- **Pets**: `PetRules` (shared/pets.ts) keeps one pet entity (`pet_<ownerId>`, kind `pet`, `owner`) per player,
+  synced from `Progress.pets` every tick (aura/charge perks set on the owner). Pets copy their owner's side/flags, and
+  `canHarm` never lets owner and pet hurt each other. Hunger is wall-clock (`fedAt`). Taming: `startTame` (eats food,
+  calms the creature, client gets a `trust` game) then `finishTame` (server checks the offer window and minimum
+  time). Mounting emits `mount`; the client sets `Player.mount` (speed, fly, swim) and draws its own mount under the
+  predicted position (`CreatureView.myMount`); the server widens the move budget and allows height for flying mounts.
+  Bond Trial spirits have `trialOf`: `canHarm` makes them a duel.
+- **NPC advice**: `adviceFor()` (shared/advice.ts) is a pure function of the player, their progress and the world
+  clock, so the dialog computes it in the browser for every non-master NPC; masters and Beastkeepers also ask the
+  authority (`quest:talk`) for quest lines.
 - **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
   are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
 

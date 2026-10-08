@@ -26,6 +26,8 @@
     { "id": "declineInvite","label": "Decline party invite", "group": "Interface", "keys": ["KeyN"] },
     { "id": "build",        "label": "Camp: build & bag",  "group": "Interface", "keys": ["KeyB"] },
     { "id": "channel",      "label": "Channel (bend-craft)", "group": "Bending", "keys": ["KeyC"] },
+    { "id": "pets",         "label": "Pets panel",         "group": "Interface", "keys": ["KeyO"] },
+    { "id": "mount",        "label": "Ride / dismount pet", "group": "Movement", "keys": ["KeyH"] },
     { "id": "freeCamera",   "label": "Debug free camera",  "group": "Interface", "keys": ["F2"] }
   ],
   "reserved": ["Escape", "F3", "F4", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"],

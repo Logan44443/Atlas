@@ -157,7 +157,7 @@ ok((await inv(A)).wood === wood0 - 6, 'the wall cost 6 wood');
 ok((await A.page.evaluate(() => window.__fw.structView.count)) >= 2, 'structures render (meshes + colliders)');
 await goTo(A, site.x + 8, site.z);
 const chest = await buildWithGhost(A, 'chest');
-ok(!!chest.placed, 'chest placed');
+ok(!!chest.placed, `chest placed${chest.placed ? '' : ` (ghost: ${JSON.stringify(chest.ghost)})`}`);
 await A.page.screenshot({ path: `${outDir}/p9-camp.png` });
 
 // Chest: G opens it, store everything, take stone back.
@@ -189,9 +189,31 @@ ok((await inv(A)).mud === 3 && (await inv(B)).mud === 3, 'water + earth channell
 // Raids: an outlaw firebender against the wall.
 const C = await open('C', `char=Ember${run}&el=fire&fac=redfang`);
 const W = wall.placed;
-const standX = W.x - 6;
-await goTo(C, standX, W.z);
+await goTo(C, W.x - 6, W.z);
 await until(C, (id) => window.__fw.host.camps.all.has(id), W.id, 30000).catch(() => {});
+// Stand 6 m from the wall with a clear line of fire: trunks and boulders stop bending,
+// and other camp pieces would take the hits instead.
+const stand = await C.page.evaluate((id) => {
+  const f = window.__fw;
+  const w = f.host.camps.all.get(id);
+  const g = (x, z) => f.sampler.height(x, z);
+  for (let k = 0; k < 16; k++) {
+    const a = Math.PI + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+    const x = w.x + Math.cos(a) * 6;
+    const z = w.z + Math.sin(a) * 6;
+    let clear = Math.abs(g(x, z) - g(w.x, w.z)) < 2;
+    for (let t = 0; t <= 1 && clear; t += 0.05) {
+      const px = x + (w.x - x) * t;
+      const pz = z + (w.z - z) * t;
+      const py = g(x, z) + 1.4 + (w.y + 1.5 - g(x, z) - 1.4) * t;
+      if (f.obstacles.hit(px, py, pz, 0.4)) clear = false;
+      for (const s of f.host.camps.all.values()) if (s.id !== id && Math.hypot(s.x - px, s.z - pz) < 2.5) clear = false;
+    }
+    if (clear) return { x, z };
+  }
+  return { x: w.x - 6, z: w.z };
+}, W.id).catch(() => ({ x: W.x - 6, z: W.z }));
+await goTo(C, stand.x, stand.z);
 ok(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id), 'other players see the camp (streamed structures)');
 const shoot = (n) => C.page.evaluate(async ([id, count]) => {
   const f = window.__fw;

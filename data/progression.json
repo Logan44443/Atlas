@@ -6,7 +6,7 @@
   "pointsPerLevel": 1,
   "kill": {
     "_comment": "Base XP for a kill, before the level-difference factor. Dummies only teach up to dummyMaxLevel.",
-    "npc": { "fighter": 90, "guard": 160, "vendor": 40, "trainer": 60, "quest": 40 },
+    "npc": { "fighter": 90, "guard": 160, "vendor": 40, "trainer": 60, "quest": 40, "beast": 40 },
     "dummy": { "dummy_a": 12, "dummy_b": 12, "dummy_c": 30 },
     "dummyMaxLevel": 5,
     "player": 150

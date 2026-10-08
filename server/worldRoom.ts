@@ -27,6 +27,9 @@ import { camps, onlineChars } from './camps';
 import { BUILD, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory, type Structure } from '../shared/building';
 import { CraftRules, type Crafter, type Crafted } from '../shared/crafting';
 import { campRespawn, milestoneXp, shrineBonus, ventTick } from '../shared/campRules';
+import { Wildlife, type WildNews } from '../shared/sim/wildlife';
+import { PET_RULES, PetRules, petDef, sanitizePets } from '../shared/pets';
+import { Obstacles } from '../shared/props';
 
 interface AuthResult {
   account: Account;
@@ -43,6 +46,8 @@ const HALF_WORLD = (worldData.worldChunks * CHUNK) / 2;
 const DEV = process.env.NODE_ENV !== 'production';
 const sampler = new TerrainSampler(terrainConfig());
 const groundAt = (x: number, z: number) => sampler.height(x, z);
+/** Tree trunks and boulders, shared by every shard in the process. */
+const obstacles = new Obstacles(sampler, 2048);
 
 interface PlayerData {
   entity: SimEntity;
@@ -67,6 +72,8 @@ interface PlayerData {
   /** structures this client has been sent */
   knownStructs: Set<string>;
   raidNoticeT: number;
+  /** sim time until which flying-mount heights are allowed (after getting off mid-air) */
+  flyGrace: number;
 }
 
 /** Structures within this many metres are streamed to a client. */
@@ -97,6 +104,8 @@ export class WorldRoom extends Room<WorldState> {
   private crafts = new CraftRules();
   private unlisten: (() => void) | null = null;
   private ventT = 0;
+  private wild = new Wildlife(this.sim, groundAt);
+  private pets = new PetRules(this.sim, this.wild, groundAt);
 
   onCreate(): void {
     const state = new WorldState();
@@ -109,6 +118,8 @@ export class WorldRoom extends Room<WorldState> {
     for (const e of this.sim.entities.values()) this.state.entities.set(e.id, this.newState(e));
     // Camps are shared by every shard in the process.
     this.sim.solids = camps.solids;
+    this.sim.obstacleAt = (x, y, z, r) => obstacles.hit(x, y, z, r);
+    this.onPetMessages();
     this.unlisten = camps.listen((st, change) => this.onStructChange(st, change));
     this.onBuildMessages();
 
@@ -158,6 +169,24 @@ export class WorldRoom extends Room<WorldState> {
         giveItems(p.progress.inv, sanitizeInv(items, 1e6));
         c.send('progress', p.progress);
       });
+      // Tests: raise a boss now (next to you with here=true), force Bond Trial rolls.
+      this.onMessage('dev:boss', (c, m: { id?: string; here?: boolean; hp?: number }) => {
+        const p = this.players.get(c.sessionId);
+        if (!p || !m?.id) return;
+        const e = this.wild.forceBoss(String(m.id), m.here ? { x: p.entity.pos.x + 14, z: p.entity.pos.z } : undefined);
+        if (e && Number.isFinite(m.hp) && m.hp! > 0) e.hp = Math.min(e.maxHp, Math.round(m.hp!));
+      });
+      // Tests: put a pet straight into your stable.
+      this.onMessage('dev:pet', (c, kind: string) => {
+        const p = this.players.get(c.sessionId);
+        const def = petDef(String(kind));
+        if (!p || !def || p.progress.pets.owned.length >= PET_RULES.maxPets) return;
+        this.pets.addPet(p, def, Date.now());
+        c.send('progress', p.progress);
+      });
+      this.onMessage('dev:bond', (_c, on: boolean | null) => {
+        this.wild.forceBond = on === null ? null : !!on;
+      });
       this.onMessage('dev:clock', (_c, hours: number) => {
         if (Number.isFinite(hours)) this.clockShiftMs = hours * (timeData.dayLengthMinutes * 60_000) / 24;
       });
@@ -174,6 +203,13 @@ export class WorldRoom extends Room<WorldState> {
     // Special Arts: talk to a master (quests), equip a learned art.
     this.onMessage('quest:talk', (c, npcId: string) => {
       const p = this.players.get(c.sessionId);
+      // Beastkeepers hand out rare pet quests.
+      const keeper = this.sim.entities.get(String(npcId));
+      if (p && keeper?.role === 'beast' && keeper.pos.distanceTo(p.entity.pos) <= 8) {
+        c.send('quest', { art: '', npc: keeper.id, line: this.pets.keeperTalk(p) });
+        c.send('progress', p.progress);
+        return;
+      }
       const art = ARTS.find((a) => masterId(a.id) === npcId);
       const npc = this.sim.entities.get(String(npcId));
       if (!p || !art || !npc || npc.pos.distanceTo(p.entity.pos) > 8) return;
@@ -270,7 +306,7 @@ export class WorldRoom extends Room<WorldState> {
     pos.y = Math.max(groundAt(pos.x, pos.z), worldData.seaLevel);
     const progress = newProgress({
       level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])], rank: c.rank, arts: sanitizeArts(c.element, c.arts),
-      inv: sanitizeInv(c.inv), milestones: Array.isArray(c.milestones) ? c.milestones.map(String) : [],
+      inv: sanitizeInv(c.inv), milestones: Array.isArray(c.milestones) ? c.milestones.map(String) : [], pets: sanitizePets(c.pets),
     });
     progress.mastery = sanitizeAlloc(c.element, progress.level, c.mastery);
     const entity = createEntity({
@@ -286,7 +322,7 @@ export class WorldRoom extends Room<WorldState> {
     this.players.set(client.sessionId, {
       entity, last: pos.clone(), lastT: Date.now(), allowance: 0, lastDodge: -1e9, invSince: -1, swimming: false, aim: new Vector3(0, 0, 1), seq: 0, deadT: 0,
       characterId: c.id, pvpToggleT: -1e9, progress, respawnedAt: this.sim.time, still: 0, stillFrom: pos.clone(),
-      knownStructs: new Set(), raidNoticeT: -1e9,
+      knownStructs: new Set(), raidNoticeT: -1e9, flyGrace: -1e9,
     });
     onlineChars.add(c.id);
     camps.touch(c.id);
@@ -306,7 +342,7 @@ export class WorldRoom extends Room<WorldState> {
     return WorldRoom.store
       .saveCharacter(p.characterId, {
         pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)], level: pr.level, xp: pr.xp, mastery: pr.mastery, discovered: pr.discovered,
-        arts: pr.arts, rank: pr.rank, inv: pr.inv, milestones: pr.milestones,
+        arts: pr.arts, rank: pr.rank, inv: pr.inv, milestones: pr.milestones, pets: pr.pets,
       })
       .catch((err) => console.error('[db] save failed', err));
   }
@@ -361,8 +397,12 @@ export class WorldRoom extends Room<WorldState> {
     this.clientOf(a.id)?.send('xp', msg);
   }
 
-  private onDeath(victimId: string, sourceId: string | null): void {
+  private onDeath(victimId: string, sourceIdIn: string | null): void {
     const victim = this.sim.entities.get(victimId);
+    // A pet's kill belongs to its owner.
+    const src = sourceIdIn ? this.sim.entities.get(sourceIdIn) : undefined;
+    const sourceId = src?.owner || (sourceIdIn?.startsWith('pet_') ? sourceIdIn.slice(4) : sourceIdIn);
+    if (victim?.kind === 'creature') this.applyWild(this.wild.onDeath(victimId, sourceId && this.players.has(sourceId) ? sourceId : null, this.players));
     const killer = sourceId ? this.players.get(sourceId) : undefined;
     if (!victim || !killer || victim === killer.entity) return;
     for (const a of this.xp.onKill(victim, killer, this.players, this.parties.membersOf(killer.entity.id), this.sim.time)) this.grant(a);
@@ -437,6 +477,87 @@ export class WorldRoom extends Room<WorldState> {
       this.onStructChange(chest, 'hp');
       c.send('progress', p.progress);
     });
+  }
+
+  // ---- pets and wildlife (Phase 10) --------------------------------------------
+
+  private onPetMessages(): void {
+    const say = (c: Client, text: string, warn = false) => c.send('notice', warn ? { text, warn } : { text });
+    this.onMessage('pet:tame', (c) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || p.entity.dead) return;
+      const r = this.pets.startTame(p, null);
+      if (typeof r === 'string') return say(c, r, true);
+      c.send('trust', r);
+      c.send('progress', p.progress);
+    });
+    this.onMessage('pet:trust', (c, ok: boolean) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const r = this.pets.finishTame(p, !!ok, Date.now());
+      say(c, r.text, !!r.warn);
+      c.send('progress', p.progress);
+    });
+    this.onMessage('pet:active', (c, uid: string | null) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const err = this.pets.setActive(p, uid === null ? null : String(uid));
+      if (err) say(c, err, true);
+      c.send('progress', p.progress);
+    });
+    this.onMessage('pet:feed', (c, uid: string) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      say(c, this.pets.feed(p, String(uid), Date.now()));
+      c.send('progress', p.progress);
+    });
+    this.onMessage('pet:mount', (c) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      const err = this.pets.toggleMount(p, Date.now());
+      if (err) say(c, err, true);
+    });
+  }
+
+  /** Turn wildlife news into XP, loot, messages and pet events. */
+  private applyWild(list: WildNews[]): void {
+    for (const n of list) {
+      if (n.t === 'announce') {
+        this.broadcast('announce', n.text);
+        continue;
+      }
+      const p = this.players.get(n.id);
+      const c = this.clientOf(n.id);
+      if (!p) continue;
+      switch (n.t) {
+        case 'xp':
+          this.grant({ id: n.id, amount: n.amount, reason: n.reason });
+          break;
+        case 'loot': {
+          const got = giveItems(p.progress.inv, n.items);
+          if (Object.keys(got).length) c?.send('notice', { text: `+${itemsText(got)}` });
+          c?.send('progress', p.progress);
+          break;
+        }
+        case 'notice':
+          c?.send('notice', n.warn ? { text: n.text, warn: true } : { text: n.text });
+          break;
+        case 'bond': {
+          const text = this.pets.startTrial(p, n.boss);
+          if (text) c?.send('announce', text);
+          break;
+        }
+        case 'rare': {
+          const g = this.pets.offerRare(p, n.pet);
+          if (g) c?.send('trust', g);
+          break;
+        }
+        case 'trial':
+          c?.send('notice', { text: this.pets.endTrial(p, n.pet, n.won, Date.now()), warn: !n.won });
+          c?.send('progress', p.progress);
+          break;
+      }
+    }
   }
 
   private applyCraft(cr: Crafted): void {
@@ -555,6 +676,7 @@ export class WorldRoom extends Room<WorldState> {
       camps.touch(p.characterId);
       this.leaveParty(client.sessionId, 'left');
       this.parties.decline(client.sessionId);
+      this.pets.forget(client.sessionId);
       await this.save(p);
     }
     this.players.delete(client.sessionId);
@@ -579,13 +701,16 @@ export class WorldRoom extends Room<WorldState> {
     const dt = Math.min(1, Math.max(0.001, (now - p.lastT) / 1000));
     const dist = Math.hypot(to.x - p.last.x, to.z - p.last.z);
     const mv = NET.movement;
-    const budget = characterData.runSpeed * mv.speedTolerance * dt + mv.slackMeters + p.allowance;
+    // Riding a mount: faster (and flying mounts may leave the ground).
+    const mount = this.pets.mountOf(e.id);
+    if (mount?.fly) p.flyGrace = this.sim.time + 6;
+    const budget = characterData.runSpeed * (mount ? Math.max(mount.speed, mount.swim ?? 1) : 1) * mv.speedTolerance * dt + mv.slackMeters + p.allowance;
     const ground = groundAt(to.x, to.z);
     let reject = '';
     if (Math.abs(to.x) > HALF_WORLD || Math.abs(to.z) > HALF_WORLD) reject = 'edge of the world';
     else if (dist > budget) reject = 'too fast';
     else if (to.y < Math.min(ground, worldData.seaLevel - characterData.swim.depth - 1) - mv.maxBelowGround) reject = 'under ground';
-    else if (to.y > ground + mv.maxAboveGround && e.flyUntil + 4 < this.sim.time) reject = 'too high';
+    else if (to.y > ground + mv.maxAboveGround && e.flyUntil + 4 < this.sim.time && p.flyGrace < this.sim.time) reject = 'too high';
     else if (e.spiritUntil > this.sim.time && dist > mv.slackMeters + p.allowance) reject = 'spirit projecting';
     else if ((e.statuses.has('root') || e.statuses.has('stagger')) && dist > mv.slackMeters + p.allowance) reject = 'rooted';
     if (reject) {
@@ -635,6 +760,13 @@ export class WorldRoom extends Room<WorldState> {
     this.sim.update(dt);
     for (const b of this.brains) updateDummy(b, dt, this.sim, groundAt);
     for (const b of this.npcs) updateNpc(b, dt, this.sim, groundAt);
+    const now = Date.now();
+    this.wild.now = this.now();
+    this.wild.night = this.night();
+    const owners = [...this.players.values()];
+    this.applyWild(this.wild.update(dt, owners));
+    for (const p of owners) this.pets.sync(p, now);
+    this.pets.update(dt, this.players, now);
     const events = this.sim.drain();
 
     for (const p of this.players.values()) {
@@ -690,10 +822,16 @@ export class WorldRoom extends Room<WorldState> {
     // Level-up events raised by grant() above.
     events.push(...this.sim.drain());
 
+    // Creatures and pets come and go: keep the replicated map in step with the sim.
     for (const e of this.sim.entities.values()) {
-      const st = this.state.entities.get(e.id);
-      if (st) this.writeState(st, e);
+      let st = this.state.entities.get(e.id);
+      if (!st) {
+        st = this.newState(e);
+        this.state.entities.set(e.id, st);
+      }
+      this.writeState(st, e);
     }
+    for (const id of [...this.state.entities.keys()]) if (!this.sim.entities.has(id)) this.state.entities.delete(id);
 
     for (const client of this.clients) {
       const p = this.players.get(client.sessionId);
@@ -779,7 +917,11 @@ export class WorldRoom extends Room<WorldState> {
         return false;
       case 'struct':
       case 'craft':
+      case 'tele':
+      case 'tame':
         return near(ev.pos[0], ev.pos[2]);
+      case 'mount':
+        return nearId(ev.owner);
     }
   }
 
@@ -796,6 +938,13 @@ export class WorldRoom extends Room<WorldState> {
   private writeState(st: EntityState, e: SimEntity): void {
     const r = (v: number, k = 100) => Math.round(v * k) / k;
     st.name = e.name;
+    // A pet keeps its id (pet_<owner>) when you swap pets, so these can change too.
+    st.beast = e.beast;
+    st.own = e.owner;
+    st.sc = e.scale;
+    st.rad = e.radius;
+    st.hgt = e.height;
+    st.tri = e.trialOf;
     st.team = e.team;
     st.el = e.element ?? '';
     st.lv = e.level;

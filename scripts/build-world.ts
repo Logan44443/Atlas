@@ -10,9 +10,9 @@ import propsData from '../data/props.json' with { type: 'json' };
 import factionData from '../data/factions.json' with { type: 'json' };
 import zoneData from '../data/zones.json' with { type: 'json' };
 import { TerrainSampler } from '../shared/terrain';
-import { terrainConfig, FLATS } from '../shared/factions';
-import { mulberry32 } from '../shared/noise';
-import { CHUNK_SAMPLES, CHUNK_RES, HEIGHT_SCALE, chunkKey, type ChunkJson, type PropInstance, type PropType, type WorldManifest } from '../shared/world';
+import { terrainConfig } from '../shared/factions';
+import { chunkProps } from '../shared/props';
+import { CHUNK_SAMPLES, CHUNK_RES, HEIGHT_SCALE, chunkKey, type ChunkJson, type WorldManifest } from '../shared/world';
 
 const GENERATOR_VERSION = 3;
 const outDir = join(import.meta.dirname, '..', 'client', 'public', 'world');
@@ -42,8 +42,6 @@ const step = size / CHUNK_RES;
 const chunks: Record<string, string> = {};
 const t0 = Date.now();
 
-type PropRule = { type: PropType; perChunk: number; minHeight: number; maxHeight: number; minSlopeY: number; scale: [number, number]; clusterScale: number; clusterThreshold: number };
-const rules = propsData.rules as PropRule[];
 
 for (let cz = minChunk; cz <= maxChunk; cz++) {
   for (let cx = minChunk; cx <= maxChunk; cx++) {
@@ -61,32 +59,7 @@ for (let cz = minChunk; cz <= maxChunk; cz++) {
       }
     }
 
-    const rand = mulberry32(((cx + 1000) * 92821) ^ ((cz + 1000) * 68917) ^ cfg.seed);
-    const props: PropInstance[] = [];
-    if (maxH > cfg.seaLevel) {
-      for (const rule of rules) {
-        for (let k = 0; k < rule.perChunk; k++) {
-          const lx = rand() * size;
-          const lz = rand() * size;
-          const r = rand();
-          const sc = rand();
-          const yaw = rand() * Math.PI * 2;
-          const wx = ox + lx;
-          const wz = oz + lz;
-          const h = sampler.height(wx, wz);
-          if (h < rule.minHeight || h > rule.maxHeight) continue;
-          if (sampler.slopeY(wx, wz) < rule.minSlopeY) continue;
-          // Cluster mask: forests and boulder fields instead of uniform noise.
-          const cluster = sampler.clusterNoise(wx / rule.clusterScale, wz / rule.clusterScale);
-          if (cluster < rule.clusterThreshold || r > (cluster - rule.clusterThreshold) * 3) continue;
-          // Keep the spawn clearing open.
-          if (Math.hypot(wx - worldData.spawn.x, wz - worldData.spawn.z) < 18) continue;
-          // ...and the hub plazas and shrine platforms.
-          if (FLATS.some((f) => Math.hypot(wx - f.x, wz - f.z) < f.radius + 10)) continue;
-          props.push({ t: rule.type, p: [+lx.toFixed(2), +(h - 0.1).toFixed(2), +lz.toFixed(2)], r: +yaw.toFixed(3), s: +(rule.scale[0] + (rule.scale[1] - rule.scale[0]) * sc).toFixed(2) });
-        }
-      }
-    }
+    const props = chunkProps(sampler, cx, cz, maxH);
 
     const json: ChunkJson = {
       v: GENERATOR_VERSION,

@@ -136,6 +136,7 @@ Default PC layout (third-person action, keyboard + mouse):
 | Special Art (equipped) / Arts & quests panel | T / J |
 | Camp panel (bag, build, chest, forge) / channel (bend-craft) | B / C |
 | While placing a piece: place / rotate / cancel | Left click / R / B |
+| Pets panel / ride your pet / tame (near a wild animal, with food) | O / H / G |
 
 - **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
   mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
@@ -312,6 +313,58 @@ partner (party member or hired NPC companion); a few use the environment so solo
 
 Pet data goes in `data/pets/*.json`.
 
+**As built (Phase 10)**:
+- **Common**: Fox-hounds, Shellback Tortoises and Glider Lemurs live in dens in the Wilds. Walk up with berries
+  (fallen timber) or meat (hunting) and press G: the animal eats one, calms down, and a trust game starts (a marker
+  sweeps a bar; press G in the green 3 times before missing twice, and not faster than 1.5 s). Win and it joins your
+  stable. Animals that were just in a fight are too wild to tame.
+- **Rare**: every hub has a **Beastkeeper**. Talking to one starts the next rare quest (from level guardian - 4): beat
+  the named mini boss guarding the young one (Ironhide the Rhino Matriarch, Frostfang, Old Coil; friends welcome,
+  they respawn 3 minutes after dying), then win a harder trust game with the young (4 hits, narrower zone).
+- **Legendary**: Sun Dragon, Cloud Bison, Tide Serpent and Burrow Titan are world bosses on a wall-clock schedule
+  (same on every shard), each in its own region, announced to the whole server when they rise and when they fall.
+  Everyone of the matching element who dealt at least 2% of the damage rolls for the bond: 5%, +5% per failed roll
+  (bad-luck protection, saved per character), capped at 60%. Winning the roll opens a solo **Bond Trial** against
+  the boss's spirit right there (no one else can hit it or be hit by it; 150 s; it uses the boss's moves at 60%
+  strength). Beat it and the legendary pet is
+  yours. While it is out: +15% element power aura (matching element), and the Sun Dragon makes lightning charge 30%
+  faster. Sun Dragon and Cloud Bison fly, the Tide Serpent swims fast.
+- **Pets**: one out at a time; it follows you, attacks what you attack (or what attacks you), levels with you
+  (health grows per level), and is knocked out for 45 s if it goes down. Hunger drains 6% per hour of real time;
+  under 30% it fights at reduced strength and won't carry you. Feed it from the pets panel (O): berries 15,
+  meat 30, spirit shards 100. Stable of 8; the rest wait there. Pet kills count as yours.
+- **Mounts** (H with a mount out, not in the first 3 s after a fight): rhino x1.35 run speed, polar wolf x1.25,
+  eel-hound x1.2 and swims x2; legendary mounts x1.4-1.5: the Sun Dragon and Cloud Bison fly (Space climbs, Shift
+  dives, you hover in place), the Tide Serpent swims x2.6, the Burrow Titan is armoured. You can bend from the saddle; a hit for more than 15% of your health throws you off.
+
+### 11a. Wildlife and bosses (as built in Phase 10)
+
+- **Dens** are a pure function of the world seed: one possible den per 120 m cell in the Wilds (none within 125 m of
+  a hub), each with one species and a pack size. A den fills when a player comes within 180 m and empties when nobody
+  is within 240 m; a wiped-out den refills after 45 s. Creature level = 1 + distance from the nearest hub / 28 m,
+  clamped to the species' range, so the far Wilds are dangerous.
+- **9 species**: passive (Hop-hare, Glider Lemur, Shellback Tortoise: flee when hurt), neutral (Fox-hound, Bristle
+  Boar: fight back) and aggressive (Ridge Wolf packs, Thorn Bear, Ash Buzzard, Marsh Eel: attack within 15 m). They
+  wind up before their bites and charges (the body rears back), leash back home past 36 m, and never fight each
+  other. They give XP (their bounty x the usual level-difference factor, shared with the party like NPC kills) and
+  loot: meat, hide, fang. Nothing fights inside a safe hub.
+- **Bosses** (`data/bosses.json`): 3 rare beasts (mini bosses), 3 world bosses (Ashmaw the Magma Toad, the Gale Roc,
+  the Hollow Stag) and the 4 legendaries. Health = max(minimum, per-player x challengers in the arena) and grows as
+  people join. Phases at health thresholds switch move sets and enrage. Moves (melee, ground rings, cones,
+  projectile volleys, charges, summoned adds) are **telegraphed**: a red ring, cone or lane is painted on the ground
+  and fills up until it goes off. Everyone within 140 m who dealt at least 2% of the damage gets the XP and loot.
+- **Solid world**: tree trunks and boulders are solid. The player's capsule collides with them (Rapier cylinders for
+  the near chunks, built from the same deterministic scatter as the chunk files), and projectiles and lightning stop
+  on them on both the server and offline. Bushes stay walk-through.
+- **Bending marks**: bending that lands leaves a decal on what it hit: scorch on a trunk or the ground (fire, 90 s),
+  cracked craters (earth, 120 s), wet splashes that dry (water, 25 s) and wind-scoured swirls (air, 45 s). Client
+  only, instanced (4 draw calls).
+- **Hub NPCs give advice that fits you**: trainers point out unspent mastery points, what your element is good at
+  right now (day/night) and where to learn your next Special Art; quest givers name hunting grounds at your level
+  with directions, bosses that are up or rising soon, and landmarks you have not discovered; vendors talk food,
+  bag space, refining and camps; guards explain PvP flags and the raid window; patrols warn about aggressive dens
+  nearby; Beastkeepers check on your pet's hunger and explain taming and mounts.
+
 ## 12. Build phases (in order; each must be playable)
 
 1. **Foundations**: Vite + TS + Three.js WebGPU setup, stylized terrain, sky, day/night cycle, grass, quality presets, FPS/debug overlay.
@@ -323,7 +376,7 @@ Pet data goes in `data/pets/*.json`.
 7. **Progression**: XP, levels, mastery trees, parties and shared XP, anti-griefing rules. Party combat combos (e.g. steam blind).
 8. **Special Arts**: master NPCs and quests, then implement the arts one at a time.
 9. **Building**: camps, then bending crafting (element combo recipes, section 10a), then crew bases, raid windows. *(Done, except crew bases and crew-set raid windows, which move to Phase 11 with crews.)*
-10. **Pets**: common taming, then rare, then legendary world bosses and the Bond Trial.
+10. **Pets**: common taming, then rare, then legendary world bosses and the Bond Trial. *(Done, together with wildlife, world bosses, solid trees/rocks, bending marks and NPC advice.)*
 11. **Territory wars, crews, polish, deployment**: CDN, servers, monitoring.
 
 ## 13. How we work

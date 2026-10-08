@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { CHUNK_SAMPLES, chunkKey } from '@shared/world';
 import characterData from '@data/character.json';
+import type { Obstacle } from '@shared/props';
 
 export { RAPIER };
 
@@ -11,6 +12,8 @@ export { RAPIER };
 export class Physics {
   readonly world: RAPIER.World;
   private terrain = new Map<string, RAPIER.Collider>();
+  /** tree trunks and boulders of near chunks */
+  private props = new Map<string, RAPIER.Collider[]>();
 
   private constructor() {
     this.world = new RAPIER.World({ x: 0, y: characterData.gravity, z: 0 });
@@ -36,10 +39,30 @@ export class Physics {
 
   removeTerrainChunk(cx: number, cz: number): void {
     const key = chunkKey(cx, cz);
+    for (const p of this.props.get(key) ?? []) this.world.removeCollider(p, false);
+    this.props.delete(key);
     const c = this.terrain.get(key);
     if (!c) return;
     this.world.removeCollider(c, false);
     this.terrain.delete(key);
+  }
+
+  /** Trees and rocks are solid: one upright cylinder per trunk or boulder. */
+  addPropChunk(cx: number, cz: number, obstacles: Obstacle[]): void {
+    const key = chunkKey(cx, cz);
+    if (this.props.has(key)) return;
+    this.props.set(
+      key,
+      obstacles.map((o) =>
+        this.world.createCollider(RAPIER.ColliderDesc.cylinder(o.height / 2, o.radius).setTranslation(o.x, o.y + o.height / 2, o.z).setFriction(0.4)),
+      ),
+    );
+  }
+
+  get propColliderCount(): number {
+    let n = 0;
+    for (const l of this.props.values()) n += l.length;
+    return n;
   }
 
   /** Static box (walls, buildings), rotated by `yaw` around Y. */

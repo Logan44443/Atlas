@@ -1,0 +1,67 @@
+{
+  "_comment": "Wild creatures (Phase 10). Dens are a pure function of the world seed: one possible den per denCell metres. A den fills with its species when a player comes within activateRadius and empties when nobody is within despawnRadius. Creature level grows with distance from the nearest faction hub (1 + metres / metresPerLevel, clamped to the species' levels). temper: passive (flees when hurt), neutral (fights back), aggressive (attacks players in aggroRange). tame: common species can be tamed with their food (see data/pets). shape picks the model: quad, hare, turtle, bird, serpent.",
+  "denCell": 120,
+  "denChance": 0.75,
+  "activateRadius": 180,
+  "despawnRadius": 240,
+  "respawnSeconds": 45,
+  "minHubDistance": 125,
+  "metresPerLevel": 28,
+  "leash": 36,
+  "aggroRange": 15,
+  "thinkEvery": 0.5,
+  "fleeSeconds": 6,
+  "species": [
+    {
+      "id": "hare", "name": "Hop-hare", "shape": "hare", "color": "#c9a77a", "accent": "#f1e4cc", "scale": 0.55,
+      "temper": "passive", "hp": 70, "speed": 7.5, "levels": [1, 14], "pack": [2, 4], "xp": 22, "heights": [2, 45],
+      "loot": { "meat": 1 }, "tame": null, "attack": null
+    },
+    {
+      "id": "lemur", "name": "Glider Lemur", "shape": "quad", "color": "#d8d2c4", "accent": "#5a4e44", "scale": 0.5,
+      "temper": "passive", "hp": 80, "speed": 8, "levels": [3, 18], "pack": [1, 3], "xp": 26, "heights": [6, 60], "forest": true,
+      "loot": { "meat": 1 }, "tame": "lemur", "attack": null
+    },
+    {
+      "id": "tortoise", "name": "Shellback Tortoise", "shape": "turtle", "color": "#6f8f4a", "accent": "#c4a46a", "scale": 0.8,
+      "temper": "passive", "hp": 160, "speed": 1.8, "levels": [2, 20], "pack": [1, 2], "xp": 30, "heights": [0.6, 8],
+      "loot": { "meat": 1, "hide": 1 }, "tame": "tortoise", "attack": null
+    },
+    {
+      "id": "foxhound", "name": "Fox-hound", "shape": "quad", "color": "#d0702e", "accent": "#f4e6d2", "scale": 0.75,
+      "temper": "neutral", "hp": 140, "speed": 8.5, "levels": [2, 22], "pack": [1, 3], "xp": 40, "heights": [3, 60],
+      "loot": { "meat": 1, "hide": 1 }, "tame": "foxhound",
+      "attack": { "kind": "melee", "damage": 12, "range": 2.4, "every": 1.6, "windup": 0.45, "knockback": 2 }
+    },
+    {
+      "id": "boar", "name": "Bristle Boar", "shape": "quad", "color": "#5b4636", "accent": "#e8dcc0", "scale": 0.95,
+      "temper": "neutral", "hp": 220, "speed": 7, "levels": [4, 26], "pack": [1, 3], "xp": 55, "heights": [3, 50],
+      "loot": { "meat": 2, "hide": 1 }, "tame": null,
+      "attack": { "kind": "charge", "damage": 22, "range": 2.6, "every": 3.2, "windup": 0.8, "knockback": 8, "distance": 9 }
+    },
+    {
+      "id": "wolf", "name": "Ridge Wolf", "shape": "quad", "color": "#6e6e74", "accent": "#d9d9de", "scale": 0.85,
+      "temper": "aggressive", "hp": 170, "speed": 9.2, "levels": [6, 32], "pack": [2, 4], "xp": 65, "heights": [20, 140],
+      "loot": { "meat": 1, "hide": 1, "fang": 1 }, "tame": null,
+      "attack": { "kind": "melee", "damage": 16, "range": 2.4, "every": 1.5, "windup": 0.45, "knockback": 3, "status": { "type": "slow", "duration": 1.5, "amount": 0.25 } }
+    },
+    {
+      "id": "bear", "name": "Thorn Bear", "shape": "quad", "color": "#4a3324", "accent": "#7fa35a", "scale": 1.45,
+      "temper": "aggressive", "hp": 520, "speed": 6.4, "levels": [10, 40], "pack": [1, 1], "xp": 140, "heights": [8, 70], "forest": true,
+      "loot": { "meat": 3, "hide": 2, "fang": 1 }, "tame": null,
+      "attack": { "kind": "slam", "damage": 34, "range": 3.4, "radius": 3.6, "every": 2.8, "windup": 0.9, "knockback": 9 }
+    },
+    {
+      "id": "buzzard", "name": "Ash Buzzard", "shape": "bird", "color": "#3b3434", "accent": "#e07a2c", "scale": 0.9,
+      "temper": "aggressive", "hp": 120, "speed": 10, "levels": [8, 36], "pack": [2, 3], "xp": 60, "heights": [40, 200],
+      "loot": { "meat": 1, "fang": 1 }, "tame": null,
+      "attack": { "kind": "spit", "damage": 14, "range": 22, "every": 2.2, "windup": 0.6, "speed": 24, "status": { "type": "burn", "duration": 2, "dps": 4 } }
+    },
+    {
+      "id": "eel", "name": "Marsh Eel", "shape": "serpent", "color": "#2f5f5a", "accent": "#a6e0c9", "scale": 0.8,
+      "temper": "aggressive", "hp": 150, "speed": 6, "levels": [5, 30], "pack": [1, 2], "xp": 58, "heights": [-4, 2.5],
+      "loot": { "meat": 1 }, "tame": null,
+      "attack": { "kind": "spit", "damage": 13, "range": 18, "every": 2.4, "windup": 0.5, "speed": 22, "status": { "type": "slow", "duration": 2, "amount": 0.3 } }
+    }
+  ]
+}

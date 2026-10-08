@@ -17,6 +17,7 @@ import { modKit, modAbility, NO_MODS, PROG, type Mods } from '../progression';
 import artsData from '../../data/arts.json';
 import comboData from '../../data/partyCombos.json';
 import type { Solid } from '../building';
+import type { Obstacle } from '../props';
 
 export interface PartyCombo {
   id: string;
@@ -65,7 +66,7 @@ export interface Shield {
 export interface SimEntity {
   id: string;
   name: string;
-  kind: 'player' | 'dummy' | 'npc';
+  kind: 'player' | 'dummy' | 'npc' | 'creature' | 'pet';
   /** NPC role (vendor, trainer, quest, guard, fighter) and title shown on its nameplate. */
   role?: string;
   title?: string;
@@ -123,6 +124,23 @@ export interface SimEntity {
   spiritUntil: number;
   /** last time this player hit or was hit by another player (healing penalty) */
   lastPvp: number;
+  // Wildlife and pets (Phase 10)
+  /** creature / pet species id (picks the model), '' for people */
+  beast: string;
+  /** model scale (bosses are big) */
+  scale: number;
+  /** base XP for killing it (creatures) */
+  bounty: number;
+  /** pets: the player entity id they follow */
+  owner: string;
+  /** Bond Trial spirits: only this player (and their pet) may fight it */
+  trialOf: string;
+  /** damage dealt to this entity by each player id (boss rewards) */
+  damagers: Map<string, number> | null;
+  /** outgoing power multiplier from a legendary pet's aura */
+  aura: number;
+  /** Lightning charge time multiplier (Sun Dragon) */
+  chargeScale: number;
 }
 
 /**
@@ -134,12 +152,27 @@ export function canHarm(a: SimEntity, b: SimEntity, time = 0): boolean {
   if (a === b || b.dead) return false;
   // Masters of the Special Arts are never in a fight.
   if (a.role === 'master' || b.role === 'master') return false;
-  if (a.kind === 'dummy' || b.kind === 'dummy') return a.kind !== b.kind && (a.kind === 'player' || b.kind === 'player');
+  // Pets fight for their owner and are never hurt by them.
+  if (a.owner && a.owner === b.id) return false;
+  if (b.owner && b.owner === a.id) return false;
+  if (a.owner && b.owner && a.owner === b.owner) return false;
+  // A Bond Trial is a duel: only the challenger (and their pet) and the spirit.
+  if (a.trialOf || b.trialOf) {
+    const trial = a.trialOf || b.trialOf;
+    const other = a.trialOf ? b : a;
+    return other.id === trial || other.owner === trial;
+  }
+  const ka = a.kind === 'pet' ? 'player' : a.kind;
+  const kb = b.kind === 'pet' ? 'player' : b.kind;
+  if (ka === 'dummy' || kb === 'dummy') return ka !== kb && (ka === 'player' || kb === 'player');
+  // Wild creatures fight people and pets, never each other.
+  if (ka === 'creature' && kb === 'creature') return false;
   if (a.side && a.side === b.side) return false;
   const zb = zoneAt(b.pos.x, b.pos.z).kind;
   const za = zoneAt(a.pos.x, a.pos.z).kind;
   if (za === 'safe' || zb === 'safe') return false;
-  if (a.kind === 'player' && b.kind === 'player') {
+  if (ka === 'creature' || kb === 'creature') return true;
+  if (ka === 'player' && kb === 'player') {
     if (b.protectedUntil > time) return false;
     if (za === 'contested' || zb === 'contested') return true;
     return a.pvp && b.pvp;
@@ -177,7 +210,11 @@ export type SimEvent =
   // Phase 9: bending that reaches a structure (the host applies raid rules and turns it into 'struct').
   | { t: 'structHit'; id: string; source: string; amount: number; element: ElementId; pos: [number, number, number] }
   | { t: 'struct'; id: string; hp: number; maxHp: number; pos: [number, number, number]; broke: boolean; source: string | null }
-  | { t: 'craft'; recipe: string; name: string; pos: [number, number, number]; members: string[] };
+  | { t: 'craft'; recipe: string; name: string; pos: [number, number, number]; members: string[] }
+  // Phase 10: a boss's ground telegraph (ring / cone / charge line) and pet events.
+  | { t: 'tele'; owner: string; shape: 'ring' | 'cone' | 'line'; pos: [number, number, number]; dir: [number, number, number]; radius: number; angle: number; duration: number }
+  | { t: 'tame'; target: string; owner: string; pos: [number, number, number] }
+  | { t: 'mount'; owner: string; pet: string; on: boolean };
 
 interface Projectile {
   id: number;
@@ -252,6 +289,14 @@ export function createEntity(p: Partial<SimEntity> & Pick<SimEntity, 'id' | 'nam
     flyUntil: 0,
     spiritUntil: 0,
     lastPvp: -1e9,
+    beast: '',
+    scale: 1,
+    bounty: 0,
+    owner: '',
+    trialOf: '',
+    damagers: null,
+    aura: 1,
+    chargeScale: 1,
     ...p,
   };
 }
@@ -327,6 +372,8 @@ export class CombatSim {
   private nextId = 1;
   /** Camp structures (Phase 9): solid ones stop projectiles; players' bending can hit them all. */
   solids: Map<string, Solid> = new Map();
+  /** Tree trunks and boulders (Phase 10): projectiles and lightning stop on them. */
+  obstacleAt: ((x: number, y: number, z: number, r: number) => Obstacle | null) | null = null;
 
   constructor(private groundAt: (x: number, z: number) => number) {}
 
@@ -388,10 +435,20 @@ export class CombatSim {
 
     caster.chi -= def.chiCost;
     caster.cooldowns.set(slot, def.cooldown);
+    this.perform(caster, def, dirIn, grabTarget);
+    return true;
+  }
+
+  /**
+   * Run an ability for an entity: player casts after their checks, and creature,
+   * boss and pet attacks directly (no chi or cooldown here). Creatures without an
+   * element still need one for the visuals (`el`).
+   */
+  perform(caster: SimEntity, def: AbilityDef, dirIn: Vector3, grabTarget: SimEntity | null = null, el: ElementId = caster.element ?? 'earth'): void {
+    const slot = def.slot;
     caster.lastCombat = this.time;
-    const power = elementPower(CFG, caster.element, caster.ctx) * levelPower(caster.level);
+    const power = (caster.element ? elementPower(CFG, caster.element, caster.ctx) : 1) * levelPower(caster.level) * caster.aura;
     const dir = dirIn.clone().normalize();
-    const el = caster.element;
     this.events.push({ t: 'cast', caster: caster.id, ability: def.id, slot, element: el, dir: arr(dir) });
 
     let mul = 1;
@@ -471,7 +528,7 @@ export class CombatSim {
       }
       case 'beam': {
         // Lightning: stand still while it builds, then strike along the aim in an instant.
-        const charge = def.charge ?? 1.5;
+        const charge = (def.charge ?? 1.5) * caster.chargeScale;
         this.applyStatus(caster.id, null, { type: 'root', duration: charge });
         this.events.push({ t: 'charge', caster: caster.id, ability: def.id, element: el, duration: charge });
         this.later(charge, () => {
@@ -490,7 +547,8 @@ export class CombatSim {
         break;
       }
       case 'grab': {
-        const t = grabTarget!;
+        const t = grabTarget ?? this.aimTarget(caster, dir, def.range ?? 10, def.angle ?? 30);
+        if (!t) break;
         this.hit(caster, t, def, el, power, tmp.subVectors(t.pos, caster.pos).clone(), null);
         if (!t.dead) {
           this.grabs.push({ owner: caster, target: t, remaining: def.duration ?? 2, pull: (def.pull ?? 6) * (caster.ctx.moonPhase > 0.95 ? 1.3 : 1) });
@@ -509,7 +567,6 @@ export class CombatSim {
         this.events.push({ t: 'spirit', target: caster.id, duration: def.duration ?? 15, range: def.range ?? 90 });
         break;
     }
-    return true;
   }
 
   /** Enemy closest to the aim line within range and a cone (grabs). */
@@ -569,6 +626,18 @@ export class CombatSim {
         best = null;
       }
     }
+    // ...and so do trees and boulders.
+    if (this.obstacleAt) {
+      const q = new Vector3();
+      for (let d = 0.5; d < bestS; d += 0.5) {
+        q.copy(from).addScaledVector(dir, d);
+        if (this.obstacleAt(q.x, q.y, q.z, 0.1)) {
+          bestS = d;
+          best = null;
+          break;
+        }
+      }
+    }
     const to = from.clone().addScaledVector(dir, bestS);
     this.events.push({ t: 'beam', owner: caster.id, element: el, from: arr(from), to: arr(to), redirected });
     if (!best) return;
@@ -586,7 +655,8 @@ export class CombatSim {
   }
 
   private timers: Array<{ t: number; fn: () => void }> = [];
-  private later(t: number, fn: () => void): void {
+  /** Run `fn` after `t` seconds of sim time. */
+  later(t: number, fn: () => void): void {
     this.timers.push({ t, fn });
   }
 
@@ -645,7 +715,7 @@ export class CombatSim {
       this.events.push({ t: 'hit', target: target.id, source: src.id, amount: 0, element, result: 'miss' });
       return 'avoided';
     }
-    let dmg = ability.damage * power * matchup(CFG, element, target.element);
+    let dmg = ability.damage * power * matchup(CFG, src.element ? element : null, target.element);
     const crit = src.mods.crit > 0 && Math.random() < src.mods.crit;
     if (crit) dmg *= PROG.crit.multiplier;
     // Anti-griefing: much higher-level players hit low-level ones softly.
@@ -669,6 +739,11 @@ export class CombatSim {
     if (src.kind === 'player' && target.kind === 'player') src.lastPvp = target.lastPvp = this.time;
     dmg = Math.max(1, Math.round(dmg));
     target.hp = Math.max(0, target.hp - dmg);
+    // Bosses remember who fought them (rewards go to everyone who helped).
+    if (target.damagers) {
+      const who = src.kind === 'pet' ? src.owner : src.id;
+      target.damagers.set(who, (target.damagers.get(who) ?? 0) + dmg);
+    }
     this.events.push({ t: 'hit', target: target.id, source: src.id, amount: dmg, element, result, ...(crit ? { crit } : {}) });
     if (!ability.partyCombo) this.comboCheck(src, target, element);
     if (ability.status) this.applyStatus(target.id, src, ability.status);
@@ -823,6 +898,7 @@ export class CombatSim {
     }
     for (const w of this.walls) if (Math.hypot(p.pos.x - w.pos.x, p.pos.z - w.pos.z) < w.radius && p.pos.y < w.pos.y + 3) return true;
     const pr = p.ability.radius ?? 0.4;
+    if (this.obstacleAt?.(p.pos.x, p.pos.y, p.pos.z, pr * 0.5)) return true;
     for (const st of this.solids.values()) {
       if (!st.solid || !inBox(st, p.pos, pr)) continue;
       this.structHit(p.owner, st, p.ability, p.element, p.power, p.pos);

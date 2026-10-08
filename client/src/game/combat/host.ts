@@ -10,6 +10,12 @@ import characterData from '@data/character.json';
 import { Camps, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory } from '@shared/building';
 import { CraftRules, type Crafter } from '@shared/crafting';
 import { milestoneXp, shrineBonus } from '@shared/campRules';
+import { Wildlife, type WildNews } from '@shared/sim/wildlife';
+import { PET_RULES, PetRules, petDef, sanitizePets, type TrustGame } from '@shared/pets';
+import { Obstacles } from '@shared/props';
+import { TerrainSampler } from '@shared/terrain';
+import { terrainConfig } from '@shared/factions';
+import { worldDays, nightAt } from '@shared/clock';
 
 /** Where combat rules run: in this tab (offline) or on the shard server (online). */
 export interface CombatHost {
@@ -50,6 +56,18 @@ export interface CombatHost {
   forge(recipe: string): void;
   chest(id: string, items: Inventory, put: boolean): void;
 
+  // Wildlife and pets (Phase 10).
+  /** trust games to play (taming) */
+  readonly trustGames: TrustGame[];
+  /** world-wide announcements (bosses) */
+  readonly announcements: string[];
+  /** feed the nearest tameable animal and start the trust game */
+  tame(): void;
+  trust(success: boolean): void;
+  setPet(uid: string | null): void;
+  feedPet(uid: string): void;
+  toggleMount(): void;
+
   // Parties (online only).
   readonly party: PartyInfo | null;
   readonly invites: InviteMsg[];
@@ -72,6 +90,10 @@ export function applyArtsToEntity(e: SimEntity, p: Progress): void {
 }
 
 const CAMPS_KEY = 'fw.camps';
+
+/** Tree trunks and boulders, shared by every offline host in this tab. */
+let obstacles: Obstacles | null = null;
+export const worldObstacles = () => (obstacles ??= new Obstacles(new TerrainSampler(terrainConfig())));
 
 export interface XpGain {
   amount: number;
@@ -109,6 +131,10 @@ export class LocalCombat implements CombatHost {
   readonly camps: Camps;
   charId = 'local';
   private crafts = new CraftRules();
+  readonly wild: Wildlife;
+  readonly pets: PetRules;
+  readonly trustGames: TrustGame[] = [];
+  readonly announcements: string[] = [];
 
   constructor(name: string, element: SimEntity['element'], spawn: { x: number; z: number }, private groundAt: (x: number, z: number) => number, progress?: Partial<Progress>) {
     this.sim = new CombatSim(groundAt);
@@ -125,6 +151,12 @@ export class LocalCombat implements CombatHost {
     this.npcs = [...spawnNpcs(this.sim, groundAt), ...spawnMasters(this.sim, groundAt)];
     this.progress.inv = sanitizeInv(progress?.inv);
     this.progress.milestones = Array.isArray(progress?.milestones) ? [...progress.milestones] : [];
+    this.progress.pets = sanitizePets(progress?.pets);
+    // Wildlife, bosses and pets (Phase 10); bending stops on trees and rocks.
+    const obs = worldObstacles();
+    this.sim.obstacleAt = (x, y, z, r) => obs.hit(x, y, z, r);
+    this.wild = new Wildlife(this.sim, groundAt);
+    this.pets = new PetRules(this.sim, this.wild, groundAt);
     // Offline camps live in this browser.
     this.camps = new Camps(groundAt);
     try {
@@ -196,6 +228,11 @@ export class LocalCombat implements CombatHost {
   }
 
   talkTo(npcId: string): void {
+    const npc = this.sim.entities.get(npcId);
+    if (npc?.role === 'beast') {
+      this.questLines.push({ art: '', npc: npcId, line: this.pets.keeperTalk(this.owner()) });
+      return;
+    }
     const art = ARTS.find((a) => masterId(a.id) === npcId);
     if (!art) return;
     const news = this.quests.talk(this.questPlayer(), art.id, this.me.ctx.night);
@@ -229,6 +266,78 @@ export class LocalCombat implements CombatHost {
   respec(): void {
     this.setMastery({});
     this.notices.push({ text: 'Mastery points refunded' });
+  }
+
+  // ---- pets -------------------------------------------------------------------
+
+  private owner() {
+    return { entity: this.me, progress: this.progress };
+  }
+  tame(): void {
+    const r = this.pets.startTame(this.owner(), null);
+    if (typeof r === 'string') this.notices.push({ text: r, warn: true });
+    else this.trustGames.push(r);
+  }
+  trust(success: boolean): void {
+    const r = this.pets.finishTame(this.owner(), success, Date.now());
+    this.notices.push({ text: r.text, warn: r.warn });
+  }
+  setPet(uid: string | null): void {
+    const err = this.pets.setActive(this.owner(), uid);
+    if (err) this.notices.push({ text: err, warn: true });
+  }
+  feedPet(uid: string): void {
+    this.notices.push({ text: this.pets.feed(this.owner(), uid, Date.now()) });
+  }
+  toggleMount(): void {
+    const err = this.pets.toggleMount(this.owner(), Date.now());
+    if (err) this.notices.push({ text: err, warn: true });
+  }
+  /** Tests: raise a boss now (near the player when `here`), force Bond Trial rolls. */
+  devBoss(id: string, here = false, hp?: number): void {
+    const e = this.wild.forceBoss(id, here ? { x: this.me.pos.x + 14, z: this.me.pos.z } : undefined);
+    if (e && hp && hp > 0) e.hp = Math.min(e.maxHp, Math.round(hp));
+  }
+  devPet(kind: string): void {
+    const def = petDef(kind);
+    if (def && this.progress.pets.owned.length < PET_RULES.maxPets) this.pets.addPet(this.owner(), def, Date.now());
+  }
+  devBond(on: boolean | null): void {
+    this.wild.forceBond = on;
+  }
+
+  private wildNews(list: WildNews[]): void {
+    for (const n of list) {
+      switch (n.t) {
+        case 'xp':
+          this.grant(n.amount, n.reason);
+          break;
+        case 'loot': {
+          const got = giveItems(this.progress.inv, n.items);
+          if (Object.keys(got).length) this.notices.push({ text: `+${itemsText(got)}` });
+          break;
+        }
+        case 'notice':
+          this.notices.push({ text: n.text, warn: n.warn });
+          break;
+        case 'announce':
+          this.announcements.push(n.text);
+          break;
+        case 'bond': {
+          const text = this.pets.startTrial(this.owner(), n.boss);
+          if (text) this.announcements.push(text);
+          break;
+        }
+        case 'rare': {
+          const g = this.pets.offerRare(this.owner(), n.pet);
+          if (g) this.trustGames.push(g);
+          break;
+        }
+        case 'trial':
+          this.notices.push({ text: this.pets.endTrial(this.owner(), n.pet, n.won, Date.now()), warn: !n.won });
+          break;
+      }
+    }
   }
 
   invite(): void {
@@ -268,13 +377,25 @@ export class LocalCombat implements CombatHost {
     this.sim.update(dt);
     for (const b of this.brains) updateDummy(b, dt, this.sim, this.groundAt);
     for (const b of this.npcs) updateNpc(b, dt, this.sim, this.groundAt);
+    const now = Date.now();
+    this.wild.now = now;
+    this.wild.night = nightAt(worldDays(now));
+    const owner = this.owner();
+    const pet = this.pets.petOf(this.me.id);
+    // Deaths first: rewards need the creature's brain before the wildlife tidies up.
     for (const ev of this.sim.events) {
-      if (ev.t !== 'death' || ev.source !== this.me.id || ev.target === this.me.id) continue;
+      if (ev.t !== 'death' || ev.target === this.me.id) continue;
+      // Your pet's kills are yours.
+      const mine = ev.source === this.me.id || (!!pet && ev.source === pet.id);
       const victim = this.sim.entities.get(ev.target);
-      if (!victim) continue;
+      if (victim?.kind === 'creature') this.wildNews(this.wild.onDeath(ev.target, mine ? this.me.id : null, new Map([[this.me.id, owner]])));
+      if (!victim || !mine) continue;
       for (const a of this.xp.onKill(victim, this.self, new Map([[this.me.id, this.self]]), [this.me.id], this.sim.time)) this.grant(a.amount, a.reason);
       for (const n of this.quests.onKill(this.questPlayer(), victim, this.me.ctx.night)) this.questNews(n);
     }
+    this.wildNews(this.wild.update(dt, [owner]));
+    this.pets.sync(owner, now);
+    this.pets.update(dt, new Map([[this.me.id, owner]]), now);
     this.slowT += dt;
     if (this.slowT >= 1) {
       this.slowT = 0;

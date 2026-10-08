@@ -1,0 +1,20 @@
+{
+  "_comment": "Pet rules (Phase 10, DESIGN section 11). One pet is active at a time; the others wait in your stable. Pets are your level. fed drops by hungerPerHour (real time); below hungry they hit for hungryDamage and won't carry you. Food items and how much they feed are in food. Taming: interact with a tameable creature while carrying its food (one is eaten), then win the trust game: hit the moving marker inside the zone `hits` times before missing `misses` times. Rare pets come from their Beastkeeper quest and mini boss, legendary ones from a Bond Trial after their world boss.",
+  "maxPets": 8,
+  "hungerPerHour": 6,
+  "hungry": 30,
+  "hungryDamage": 0.6,
+  "food": { "berries": 15, "meat": 30, "spirit_shard": 100 },
+  "followDistance": 2.6,
+  "teleportDistance": 40,
+  "assistRange": 26,
+  "reviveSeconds": 45,
+  "matchBonus": 0.1,
+  "tameRange": 6,
+  "trust": {
+    "common": { "hits": 3, "misses": 2, "zone": 0.22, "speed": 1.1, "minSeconds": 1.5 },
+    "rare":   { "hits": 4, "misses": 2, "zone": 0.16, "speed": 1.5, "minSeconds": 2.0 },
+    "offerSeconds": 60
+  },
+  "beastkeeper": { "title": "Beastkeeper", "offset": [-14, -6] }
+}

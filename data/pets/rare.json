@@ -1,0 +1,26 @@
+{
+  "_comment": "Rare pets: talk to a Beastkeeper (every hub has one), defeat the named mini boss (data/bosses.json, tier mini), then win the harder trust game with its young. Matching your element gives +10% to their skills. mount.speed multiplies your run speed while riding (H).",
+  "pets": [
+    {
+      "id": "rhino", "name": "Armored Rhino", "tier": "rare", "from": "ironhide", "shape": "rhino", "color": "#6a6a66", "accent": "#c9c2a8", "scale": 1.1,
+      "element": "earth", "hp": 380, "hpPerLevel": 30, "speed": 10,
+      "attack": { "kind": "charge", "name": "Horn Rush", "damage": 16, "range": 2.8, "every": 3, "windup": 0.5, "knockback": 8, "distance": 7 },
+      "mount": { "speed": 1.35 },
+      "perk": "A mount: ride it with H for +35% speed."
+    },
+    {
+      "id": "polar_wolf", "name": "Polar Wolf", "tier": "rare", "from": "frostfang", "shape": "quad", "color": "#e9f2f6", "accent": "#7fb7d6", "scale": 1.0,
+      "element": "water", "hp": 260, "hpPerLevel": 20, "speed": 11,
+      "attack": { "kind": "melee", "name": "Frost Bite", "damage": 13, "range": 2.4, "every": 1.4, "windup": 0.3, "knockback": 2, "status": { "type": "slow", "duration": 1.5, "amount": 0.3 } },
+      "mount": { "speed": 1.25 },
+      "perk": "Its bites slow. Rideable (+25% speed)."
+    },
+    {
+      "id": "eelhound", "name": "Eel-hound", "tier": "rare", "from": "old_coil", "shape": "serpent", "color": "#2c5c3c", "accent": "#e5d27a", "scale": 1.0,
+      "element": "water", "hp": 240, "hpPerLevel": 18, "speed": 10,
+      "attack": { "kind": "spit", "name": "Jet", "damage": 12, "range": 20, "every": 1.6, "windup": 0.3, "speed": 28 },
+      "mount": { "speed": 1.2, "swim": 2.0 },
+      "perk": "Swims: riding it doubles your swim speed."
+    }
+  ]
+}

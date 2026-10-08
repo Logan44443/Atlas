@@ -8,6 +8,7 @@ import { SLOTS } from './combat';
 import { FACTIONS, CONTESTED, PVP, zoneAt } from './factions';
 import { newArtsState, type ArtsState } from './arts';
 import type { Inventory } from './building';
+import { newPetsState, type PetsState } from './petsState';
 import type { SimEntity } from './sim/combatSim';
 
 export const PROG = progressionData;
@@ -33,10 +34,12 @@ export interface Progress {
   inv: Inventory;
   /** one-time building XP milestones reached */
   milestones: string[];
+  /** pets, rare pet quests and Bond Trial luck (Phase 10) */
+  pets: PetsState;
 }
 
 export function newProgress(p: Partial<Progress> = {}): Progress {
-  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, inv: {}, milestones: [], ...p };
+  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, inv: {}, milestones: [], pets: newPetsState(), ...p };
 }
 
 /** Adds XP (levelling up as needed) and returns how many levels were gained. */
@@ -256,7 +259,9 @@ export class XpRules {
     let base = 0;
     let reason = victim.name;
     let isDummy = false;
-    if (victim.kind === 'npc') base = (PROG.kill.npc as Record<string, number>)[victim.role ?? ''] ?? 0;
+    // Wild creatures pay their bounty; bosses reward everyone who fought (shared/sim/wildlife.ts).
+    if (victim.kind === 'creature') base = victim.damagers ? 0 : victim.bounty;
+    else if (victim.kind === 'npc') base = (PROG.kill.npc as Record<string, number>)[victim.role ?? ''] ?? 0;
     else if (victim.kind === 'dummy') {
       isDummy = true;
       base = (PROG.kill.dummy as Record<string, number>)[victim.id.replace(/^.*?(dummy_)/, '$1')] ?? 0;

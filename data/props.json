@@ -5,5 +5,11 @@
     { "type": "broadleaf", "perChunk": 45, "minHeight": 3,  "maxHeight": 40, "minSlopeY": 0.85, "scale": [0.8, 1.4], "clusterScale": 110, "clusterThreshold": 0.15 },
     { "type": "bush",      "perChunk": 40, "minHeight": 2.5, "maxHeight": 45, "minSlopeY": 0.8, "scale": [0.6, 1.3], "clusterScale": 60,  "clusterThreshold": -0.2 },
     { "type": "rock",      "perChunk": 18, "minHeight": 1,  "maxHeight": 140, "minSlopeY": 0.5, "scale": [0.5, 2.2], "clusterScale": 80,  "clusterThreshold": 0.0 }
-  ]
+  ],
+  "solid": {
+    "_comment": "Solid core of each prop (trunk / boulder) as an upright cylinder, times the prop's scale. Bodies, projectiles and marks use it; bushes are walk-through.",
+    "pine":      { "radius": 0.32, "height": 5.5 },
+    "broadleaf": { "radius": 0.36, "height": 3 },
+    "rock":      { "radius": 1.05, "height": 1.05 }
+  }
 }

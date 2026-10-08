@@ -24,7 +24,7 @@ import { Vfx } from './game/combat/vfx';
 import { CombatView } from './game/combat/combatView';
 import { DummyView } from './game/combat/dummyView';
 import { PlayerAbilities } from './game/combat/abilities';
-import { LocalCombat, type CombatHost } from './game/combat/host';
+import { LocalCombat, worldObstacles, type CombatHost } from './game/combat/host';
 import { CFG, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import characterData from '@data/character.json';
 import { elementContextAt, worldDays } from '@shared/clock';
@@ -50,6 +50,15 @@ import { StructureView, ResourceView } from './world/campView';
 import { BuildPanel } from './ui/buildUi';
 import { campRespawn } from '@shared/campRules';
 import { sanitizeInv } from '@shared/building';
+import { obstacleOf } from '@shared/props';
+import { CreatureView } from './game/creatureView';
+import { BendingMarks } from './world/marks';
+import { Telegraphs } from './game/combat/telegraphs';
+import { PetsPanel, TrustGameUi, Announcer, BossBar, nearestTameable } from './ui/petsUi';
+import { adviceFor } from '@shared/advice';
+import { petDef } from '@shared/pets';
+import { speciesById, densNear, bossById } from '@shared/sim/wildlife';
+import { paletteOf } from './game/combat/vfx';
 
 const HELP = `Click to capture mouse, Esc for settings
 WASD move, Shift sprint, Space jump, V dodge
@@ -57,8 +66,11 @@ LMB basic, Q E R F X abilities, Tab target
 Hold right mouse: block (time it to counter)
 T special art  J arts & quests  K mastery
 B camp & bag  C channel (bend-craft)
+O pets  H ride your pet  G tame (with food)
 I invite to party  G talk/gather  P PvP flag
 F2 free camera  F3 overlay  F4/M chunk map`;
+
+const TAME_PALETTE = paletteOf('#9dffb0', true);
 
 function setLoading(text: string, frac: number) {
   const t = document.getElementById('loading-text');
@@ -95,7 +107,10 @@ async function main() {
   setLoading('Opening the world…', 0.2);
   const swActive = await registerServiceWorker();
   const streamer = new ChunkStreamer(sampler, q, {
-    onNear: (cx, cz, data) => physics.addTerrainChunk(cx, cz, worldData.chunkSize, data.heights),
+    onNear: (cx, cz, data) => {
+      physics.addTerrainChunk(cx, cz, worldData.chunkSize, data.heights);
+      physics.addPropChunk(cx, cz, data.json.props.flatMap((p) => obstacleOf(p, cx, cz, worldData.chunkSize) ?? []));
+    },
     onLeaveNear: (cx, cz) => physics.removeTerrainChunk(cx, cz),
   });
   await streamer.init();
@@ -168,7 +183,7 @@ async function main() {
   const savedProgress = {
     level: character.level, xp: character.xp ?? 0, mastery: character.mastery ?? {}, discovered: character.discovered ?? [],
     arts: character.arts as Progress['arts'] | undefined, rank: character.rank ?? 1,
-    inv: sanitizeInv(character.inv), milestones: character.milestones ?? [],
+    inv: sanitizeInv(character.inv), milestones: character.milestones ?? [], pets: character.pets as Progress['pets'] | undefined,
   } as Partial<Progress>;
   const makeLocal = (at: THREE.Vector3, progress: Partial<Progress> = savedProgress) => {
     const lc = new LocalCombat(who.name, who.element, spawn, groundAt, progress);
@@ -246,6 +261,30 @@ async function main() {
   structView.bind(host.camps);
   const nodeView = new ResourceView(groundAt);
   scene.add(nodeView.group);
+  // Wildlife, bosses and pets (Phase 10), and the marks bending leaves on the world.
+  const creatures = new CreatureView();
+  scene.add(creatures.group);
+  const marks = new BendingMarks(worldObstacles(), groundAt);
+  scene.add(marks.group);
+  const telegraphs = new Telegraphs(groundAt);
+  scene.add(telegraphs.group);
+  const petsUi = new PetsPanel(() => host, () => updateHint(), () => ({ mount: keyOf('mount'), pets: keyOf('pets'), interact: keyOf('interact') }));
+  const trustUi = new TrustGameUi();
+  trustUi.onDone = (ok) => host.trust(ok);
+  const announcer = new Announcer();
+  const bossBar = new BossBar();
+  const tameHint = document.createElement('div');
+  tameHint.className = 'interact-hint tame-hint hidden';
+  document.body.appendChild(tameHint);
+  // Hub NPCs answer with advice for this player (where to hunt, unspent points, bosses, pets...).
+  let adviceSeed = Math.floor(Math.random() * 1000);
+  dialog.advise = (e) =>
+    adviceFor({ role: e.role ?? '', me: host.me, progress: host.progress, now: host instanceof NetCombat ? host.serverNow : Date.now(), night: dayNight.nightFactor, seed: adviceSeed++ });
+  function setMount(petId: string | null) {
+    const pet = petId ? host.entities.get(petId) : undefined;
+    player.mount = pet ? (petDef(pet.beast)?.mount ?? null) : null;
+    creatures.myMount = player.mount ? petId : null;
+  }
   const build = new BuildPanel(
     () => host, scene, groundAt,
     () => ({ build: keyOf('build'), interact: keyOf('interact'), channel: keyOf('channel'), place: keyOf('basic'), rotate: keyOf('defense') }),
@@ -348,6 +387,8 @@ async function main() {
   function onCombatEvent(e: SimEvent) {
     for (const tap of eventTaps) tap(e);
     view.handle(e);
+    marks.handle(e);
+    telegraphs.handle(e);
     hud.onEvent(e, host.entities, host.me.id);
     const me = host.me;
     switch (e.t) {
@@ -376,6 +417,13 @@ async function main() {
         // Taking a real hit closes the glider.
         if (e.target === me.id && e.result === 'hit' && e.amount > 0) player.gliding = false;
         break;
+      case 'mount':
+        if (e.owner === me.id) setMount(e.on ? e.pet : null);
+        break;
+      case 'tame':
+        // A calm animal: soft green sparkles while you win its trust.
+        if (e.owner === me.id) vfx.burst(TAME_PALETTE, new THREE.Vector3(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 24, 2.5, 0.35, 1.2);
+        break;
       case 'dash':
         if (e.owner === me.id) player.dash(new THREE.Vector3(...e.dir), e.distance, e.duration, e.lift);
         break;
@@ -398,10 +446,11 @@ async function main() {
     netStatus = `offline (${reason})`;
     host = makeLocal(player.renderPos.clone(), host.progress);
     structView.bind(host.camps);
+    setMount(null);
     abilities.setElement(settings.data.element);
     console.info(`[net] ${netStatus}`);
   }
-  if (host instanceof NetCombat) host.onClose = () => goOffline('disconnected');
+  if (host instanceof NetCombat) host.onClose = (code) => goOffline(`disconnected, code ${code}`);
   const netReady = Promise.resolve();
 
   // Offline characters remember where they were.
@@ -411,7 +460,7 @@ async function main() {
       account.saveLocalCharacter(character.id, {
         pos: [player.renderPos.x, player.renderPos.y, player.renderPos.z], name: settings.data.name,
         level: p.level, xp: p.xp, mastery: p.mastery, discovered: p.discovered, arts: p.arts, rank: p.rank,
-        inv: p.inv, milestones: p.milestones,
+        inv: p.inv, milestones: p.milestones, pets: p.pets,
       });
     }
   };
@@ -465,7 +514,7 @@ async function main() {
   crosshair.className = 'crosshair hidden';
   document.body.appendChild(crosshair);
   function updateHint() {
-    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || freeCam);
+    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || petsUi.isOpen || freeCam);
     crosshair.classList.toggle('hidden', !input.pointerLocked);
   }
   gr.renderer.domElement.addEventListener('click', () => {
@@ -480,6 +529,7 @@ async function main() {
     __fw: {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
       abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal, artsPanel, spirit, build, structView, nodeView,
+      creatures, marks, telegraphs, petsUi, trustUi, announcer, bossBar, obstacles: worldObstacles(), wildInfo: { speciesById, petDef, densNear, bossById },
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -534,7 +584,7 @@ async function main() {
       if (freeCam && spirit.t <= 0) fly.update(dt);
       if (!me.dead) player.update(dt, tpc.yaw);
       syncMe();
-      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy) abilities.update(dt, me.blocking);
+      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy && !petsUi.isOpen && !trustUi.active) abilities.update(dt, me.blocking);
       for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
       if (host instanceof NetCombat) {
         for (const c of host.corrections.splice(0)) {
@@ -543,7 +593,7 @@ async function main() {
         }
         dayNight.days = worldDays(host.serverNow);
       }
-      remotes.update(dt, host.entities, host.me.id, partyUi.memberIds());
+      remotes.update(dt, host.entities, host.me.id, partyUi.memberIds(), (id) => creatures.seatOf(id, host.entities));
       for (const n of host.notices.splice(0)) zoneHud.show(n.text, n.warn);
       // Progression and parties.
       for (const g of host.xpLog.splice(0)) xpHud.gain(g, host.progress);
@@ -570,17 +620,46 @@ async function main() {
       zoneHud.pvp = me.pvp;
       zoneHud.update(dt, player.renderPos.x, player.renderPos.z);
       const interactKey = settings.data.bindings.interact?.[0];
-      const npc = dialog.nearest(host.entities.values(), player.renderPos.x, player.renderPos.z);
-      const interact = controls.pressed('interact');
-      dialog.update(npc, interact && !!npc, interactKey ? keyLabel(interactKey) : 'Interact');
-      // No one to talk to: gather, or open your chest / the forge.
-      if (interact && !npc && !build.busy) build.interact();
+      const interactLabel = interactKey ? keyLabel(interactKey) : 'Interact';
+      let interact = controls.pressed('interact');
+      // Pets: O opens the stable, H rides, taming plays the trust game on the interact key.
+      if (controls.pressed('pets')) petsUi.toggle();
+      if (controls.pressed('mount') && !freeCam && !me.dead) host.toggleMount();
+      if (creatures.myMount && !host.entities.has(creatures.myMount)) setMount(null);
+      for (const g of host.trustGames.splice(0)) trustUi.start(g);
+      if (trustUi.active) {
+        trustUi.update(dt, interact, interactLabel);
+        interact = false;
+      }
+      for (const a of host.announcements.splice(0)) announcer.show(a);
+      announcer.update(dt);
+      petsUi.update();
+      const npc = trustUi.active ? null : dialog.nearest(host.entities.values(), player.renderPos.x, player.renderPos.z);
+      dialog.update(npc, interact && !!npc, interactLabel);
+      // No one to talk to: tame the animal in front of you, gather, or open your chest / the forge.
+      const wildOne = !npc && !trustUi.active && !me.dead ? nearestTameable(host.entities.values(), player.renderPos.x, player.renderPos.z) : null;
+      tameHint.classList.toggle('hidden', !wildOne);
+      if (wildOne) {
+        const inv = host.progress.inv;
+        const fed = (inv.berries ?? 0) + (inv.meat ?? 0) + (inv.spirit_shard ?? 0) > 0;
+        const text = `${interactLabel} · Tame the ${speciesById(wildOne.beast)?.name ?? wildOne.name}${fed ? '' : ' (bring berries or meat)'}`;
+        if (tameHint.textContent !== text) tameHint.textContent = text;
+      }
+      if (interact && !npc && wildOne) host.tame();
+      else if (interact && !npc && !build.busy) build.interact();
       if (controls.pressed('pvpFlag')) togglePvp();
       syncEntityViews();
       for (const v of dummyViews.values()) v.update(dt);
       view.update(dt);
       vfx.update(dt);
+      creatures.myPos.copy(player.renderPos);
+      creatures.update(dt, host.entities, me.id);
+      marks.update(dt);
+      telegraphs.update(dt);
+      bossBar.update(host.entities.values(), player.renderPos.x, player.renderPos.z);
       avatar.root.position.copy(player.renderPos);
+      // Riding: sit on the pet's back.
+      if (player.mount && !me.dead) avatar.root.position.y += creatures.seatOf(me.id, host.entities, me.id);
       avatar.root.rotation.y = player.facing;
       const fb = abilities.feedback;
       avatar.update(dt, { ...player.pose(), cast: fb.gesture, castStyle: fb.style });
@@ -659,7 +738,8 @@ async function main() {
           extra: [
             ['Combat', `${abilities.element} vfx ${vfx.count} proj ${view.stats.projectiles} ${host.online ? 'online' : 'offline'}`],
             ['Net', host instanceof NetCombat ? `${netStatus} rtt ${host.rtt} ms, ${remotes.count} others` : netStatus],
-            ['Player', `${player.grounded ? 'grounded' : player.swimming ? 'swimming' : 'air'} ${Math.hypot(player.velocity.x, player.velocity.z).toFixed(1)} m/s${freeCam ? ' (free cam)' : ''}`],
+            ['Player', `${player.grounded ? 'grounded' : player.swimming ? 'swimming' : 'air'} ${Math.hypot(player.velocity.x, player.velocity.z).toFixed(1)} m/s${player.mount ? ' (riding)' : ''}${freeCam ? ' (free cam)' : ''}`],
+            ['Wild', `${creatures.count} creatures/pets, ${marks.count} marks, ${physics.propColliderCount} tree/rock colliders`],
             ['Chunks', `${streamer.counts.near}/${streamer.counts.mid}/${streamer.counts.far} <span class="k">n/m/f</span> phys ${physics.terrainColliderCount}`],
             ['Queue', `${streamer.counts.queued} build ${streamer.counts.building} pre ${streamer.counts.prefetch}`],
             ['Fetch', `${st.fetched} (${(st.bytes / 1048576).toFixed(1)} MB) sw ${swActive ? 'on' : 'off'} hit ${st.swHits}`],

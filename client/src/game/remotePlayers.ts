@@ -38,7 +38,7 @@ export class RemotePlayers {
     return this.views.size;
   }
 
-  update(dt: number, entities: Map<string, SimEntity>, myId: string, party: Set<string> = new Set()): void {
+  update(dt: number, entities: Map<string, SimEntity>, myId: string, party: Set<string> = new Set(), seatOf: (id: string) => number = () => 0): void {
     const me = entities.get(myId);
     for (const e of entities.values()) {
       if ((e.kind !== 'player' && e.kind !== 'npc') || e.id === myId) continue;
@@ -81,10 +81,13 @@ export class RemotePlayers {
       v.last.copy(e.pos);
       v.avatar.root.visible = true;
       v.avatar.root.position.copy(e.pos);
+      // Riding a pet: sit on its back and keep still.
+      const seat = e.kind === 'player' && !e.dead ? seatOf(e.id) : 0;
+      v.avatar.root.position.y += seat;
       v.avatar.root.rotation.y = e.yaw;
       v.avatar.root.rotation.z = e.dead ? Math.PI / 2 : 0;
       const g = this.combatView.gesture(e.id);
-      v.avatar.update(dt, { speed: v.speed, grounded: Math.abs(v.vy) < 2, vy: v.vy, dodge: 0, swimming: false, blocking: e.blocking, cast: g.cast, castStyle: g.castStyle });
+      v.avatar.update(dt, { speed: seat ? 0 : v.speed, grounded: seat > 0 || Math.abs(v.vy) < 2, vy: seat ? 0 : v.vy, dodge: 0, swimming: false, blocking: e.blocking, cast: g.cast, castStyle: g.castStyle });
     }
     for (const id of [...this.views.keys()]) {
       const e = entities.get(id);
