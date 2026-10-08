@@ -335,11 +335,23 @@ ok(await A.page.evaluate(() => !window.__fw.player.mount), 'H again gets off');
 await until(A, () => !window.__fw.host.me.dead, null, 60000).catch(() => {});
 await goTo(A, SITE.x, SITE.z);
 await waitSim(A, 1);
+// (Count XP from here: your pet may finish the weakened dragon before you do.)
+const xpB = await A.page.evaluate(() => window.__fw.__xp.length);
 await A.page.evaluate(() => {
-  const h = window.__fw.host;
+  const f = window.__fw;
+  const h = f.host;
   h.devBond(true);
   h.devBoss('sun_dragon', true, 10);
-  window.__fw.__ev.length = 0;
+  f.__ev.length = 0;
+  // Remember the Bond Trial spirit if one shows up (it can win fast against a lone test player).
+  f.__trial = null;
+  const watch = setInterval(() => {
+    const t = [...h.entities.values()].find((e) => e.trialOf && e.trialOf === h.me.id);
+    if (t) {
+      f.__trial = t.name;
+      clearInterval(watch);
+    }
+  }, 100);
 });
 await until(A, () => [...window.__fw.host.entities.values()].some((e) => e.id === 'boss_sun_dragon' && !e.dead), null, 30000).catch(() => {});
 await until(A, () => !document.querySelector('.boss-bar')?.classList.contains('hidden'), null, 20000).catch(() => {});
@@ -349,7 +361,6 @@ const tele = await A.page.evaluate(() => window.__fw.__ev.find((e) => e.t === 't
 ok(!!tele, `it telegraphs a ${tele?.shape} before striking`);
 ok(await A.page.evaluate(() => window.__fw.telegraphs.group.children.length > 0 || window.__fw.__ev.some((e) => e.t === 'tele')), 'the danger zone is painted on the ground');
 await shot(A, 'boss');
-const xpB = await A.page.evaluate(() => window.__fw.__xp.length);
 // Finish it before it wears you down (a boss heals if everyone fighting it falls).
 ok(await hunt(A, 'boss_sun_dragon', 200), 'the weakened Sun Dragon falls');
 // A level-up heals you for the Bond Trial.
@@ -357,8 +368,8 @@ await A.page.evaluate(() => window.__fw.host.room.send('dev:xp', 30000));
 // (If the dragon took you down with it you respawn in the hub, which is slow to load headless.)
 await until(A, (n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason)), xpB, 60000).catch(() => {});
 ok(await A.page.evaluate((n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason) && g.amount > 0), xpB), 'boss XP for everyone who fought');
-await until(A, () => [...window.__fw.host.entities.values()].some((e) => e.trialOf === window.__fw.host.me.id), null, 90000).catch(() => {});
-const trial = await A.page.evaluate(() => [...window.__fw.host.entities.values()].find((e) => e.trialOf === window.__fw.host.me.id)?.name);
+await until(A, () => !!window.__fw.__trial, null, 90000).catch(() => {});
+const trial = await A.page.evaluate(() => window.__fw.__trial);
 const banner = await A.page.evaluate(() => document.querySelector('.announce')?.textContent ?? '');
 ok(!!trial, `the Bond Trial opens: ${trial} (banner: "${banner}")${trial ? '' : ` notes: ${(await notes(A)).slice(-4).join(' | ')}`}`);
 await shot(A, 'trial');
