@@ -164,6 +164,25 @@ The bonus is about 10%, so skill matters more than matchup.
 
 Building data goes in `data/buildings/*.json`.
 
+## 10a. Bending crafting (element combos)
+
+Players can build and craft *through bending*: combining two elements, or an element with something in the
+world, produces a material or a structure. Each character has one element, so most combos happen with a
+partner (party member or hired NPC companion); a few use the environment so solo players can join in.
+
+- **Party combos**: two players channel at the same spot within a short window (about 1.5 s). Examples:
+  Water + Earth → mud/fertile dirt (farm plots, mud walls, slows enemies), Fire + Water → steam (vents,
+  blinding cloud, powers machines), Fire + Earth → glass or magma brick, Air + Water → fog or ice crystals,
+  Air + Fire → super-heated forge (smelting metal), Earth + Air → sandstone or dust storm.
+- **Environment combos**: one element plus a world source: Fire on sand → glass, Water on a hot spring → steam,
+  Earth on ore nodes → refined ore, Air on ash → charcoal.
+- Results are either **materials** (go to inventory, used by bases, camps and gear) or **placed structures**
+  (bridges, walls, steam vents, farm plots) that snap to the building grid.
+- Same-side combos only; the server validates both casters, range and timing (server-authoritative like all building).
+- Combo strength scales with both casters' Bending Levels; matching Special Arts unlock upgraded recipes
+  (Metalbending → steel beams, Lavabending → obsidian).
+- All recipes live in `data/crafting/combos.json` (inputs, window, range, chi cost, output, quantity, cooldown).
+
 ## 11. Pets and mounts
 
 | Tier | Examples | How to get | Element requirement |
@@ -192,9 +211,9 @@ Pet data goes in `data/pets/*.json`.
 4. **Bending v1**: one element (Fire) with 6 abilities, VFX, chi, block/counter, training-dummy NPCs. Then add the other three elements.
 5. **Multiplayer**: Colyseus shard rooms, join flow, spawn points, interpolation, server-authoritative hits, interest management.
 6. **Characters and factions**: account and character creation (element + faction picker), faction hubs, NPC members, safe/wild/contested zones, PvP flag.
-7. **Progression**: XP, levels, mastery trees, parties and shared XP, anti-griefing rules.
+7. **Progression**: XP, levels, mastery trees, parties and shared XP, anti-griefing rules. Party combat combos (e.g. steam blind).
 8. **Special Arts**: master NPCs and quests, then implement the arts one at a time.
-9. **Building**: camps, then crew bases, raid windows.
+9. **Building**: camps, then bending crafting (element combo recipes, section 10a), then crew bases, raid windows.
 10. **Pets**: common taming, then rare, then legendary world bosses and the Bond Trial.
 11. **Territory wars, crews, polish, deployment**: CDN, servers, monitoring.
 
