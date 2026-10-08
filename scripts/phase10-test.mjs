@@ -85,12 +85,25 @@ const castAt = (p, x, y, z, slot = 'basic') => p.page.evaluate(([x, y, z, slot])
 async function hunt(p, id, seconds = 150) {
   const end = Date.now() + seconds * 1000;
   let n = 0;
+  let last = null;
   while (Date.now() < end) {
-    const t = await p.page.evaluate((id) => {
-      const e = window.__fw.host.entities.get(id);
-      return e && !e.dead ? { x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z, r: e.radius } : null;
+    let t = await p.page.evaluate((id) => {
+      const f = window.__fw;
+      const e = f.host.entities.get(id);
+      if (e && !e.dead) return { x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z, r: e.radius };
+      // Gone from view isn't dead (you may have respawned far away): only a death counts.
+      return { died: !!e?.dead || f.__ev.some((ev) => ev.t === 'death' && ev.target === id) };
     }, id);
-    if (!t) return true;
+    if (t.died) return true;
+    if (t.x === undefined) {
+      // Out of view: head back to where it was last seen.
+      if (!last) {
+        await waitSim(p, 1);
+        continue;
+      }
+      t = last;
+    }
+    last = t;
     const me = await pos(p);
     // (Knocked out by a boss: wait for the respawn, then come back.)
     if (Math.hypot(me.x - t.x, me.z - t.z) > t.r + 9) await goTo(p, t.x - t.r - 3, t.z + (n % 3) - 1).catch(() => waitSim(p, 2));
@@ -337,10 +350,10 @@ ok(!!tele, `it telegraphs a ${tele?.shape} before striking`);
 ok(await A.page.evaluate(() => window.__fw.telegraphs.group.children.length > 0 || window.__fw.__ev.some((e) => e.t === 'tele')), 'the danger zone is painted on the ground');
 await shot(A, 'boss');
 const xpB = await A.page.evaluate(() => window.__fw.__xp.length);
-// A level-up heals you, so the Bond Trial starts at full health.
-await A.page.evaluate(() => window.__fw.host.room.send('dev:xp', 30000));
-await until(A, () => window.__fw.host.me.hp >= window.__fw.host.me.maxHp, null, 20000).catch(() => {});
+// Finish it before it wears you down (a boss heals if everyone fighting it falls).
 ok(await hunt(A, 'boss_sun_dragon', 200), 'the weakened Sun Dragon falls');
+// A level-up heals you for the Bond Trial.
+await A.page.evaluate(() => window.__fw.host.room.send('dev:xp', 30000));
 // (If the dragon took you down with it you respawn in the hub, which is slow to load headless.)
 await until(A, (n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason)), xpB, 60000).catch(() => {});
 ok(await A.page.evaluate((n) => window.__fw.__xp.slice(n).some((g) => /Sun Dragon/.test(g.reason) && g.amount > 0), xpB), 'boss XP for everyone who fought');

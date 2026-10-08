@@ -135,6 +135,9 @@ export class Player {
     this.body.setTranslation({ x, y, z }, true);
     this.curr.set(x, y, z);
     this.prev.copy(this.curr);
+    // Right away, not on the next update: that doesn't run while you're down, and the
+    // shard reads your position from here (a respawn would otherwise look like a speed hack).
+    this.renderPos.set(x, y - this.centerOffset, z);
     this.velocity.set(0, 0, 0);
   }
 
