@@ -2,8 +2,7 @@ import * as THREE from 'three/webgpu';
 import { SLOTS, type Slot } from '@shared/combat';
 import { keyLabel, type Settings } from '../engine/settings';
 import type { PlayerAbilities } from '../game/combat/abilities';
-import type { Combatant } from '../game/combat/combatant';
-import type { CombatEvent } from '../game/combat/combatSystem';
+import { center, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 
 const SLOT_ACTION: Record<Slot, string> = { basic: 'basic', heavy: 'heavy', control: 'control', defense: 'defense', mobility: 'mobility', ultimate: 'ultimate' };
 const ELEMENT_ICON: Record<string, string> = { fire: '🔥', water: '💧', earth: '⛰️', air: '🌀' };
@@ -68,36 +67,29 @@ export class Hud {
     }
   }
 
-  onEvent(e: CombatEvent, playerId: string): void {
-    const pos = e.target.center.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.9, 0));
+  onEvent(e: SimEvent, entities: Map<string, SimEntity>, playerId: string): void {
     let text = '';
     let cls = '';
-    switch (e.kind) {
-      case 'damage':
-        text = String(e.amount);
-        cls = e.target.id === playerId ? 'dmg-in' : e.text === 'burn' ? 'dmg-dot' : 'dmg-out';
-        break;
-      case 'perfect':
+    let target: SimEntity | undefined;
+    if (e.t === 'hit') {
+      target = entities.get(e.target);
+      if (e.result === 'perfect') {
         text = 'COUNTER!';
         cls = 'counter';
-        break;
-      case 'blocked':
-        text = 'Blocked';
-        cls = 'info';
-        break;
-      case 'dodged':
+      } else if (e.result === 'dodged') {
         text = 'Dodged';
         cls = 'info';
-        break;
-      case 'status':
-        if (e.text === 'stagger' || e.text === 'root' || e.text === 'slow') {
-          text = e.text === 'stagger' ? 'Staggered' : e.text === 'root' ? 'Rooted' : 'Slowed';
-          cls = 'info';
-        }
-        break;
-      default:
-        return;
+      } else {
+        text = (e.result === 'blocked' ? 'Blocked ' : '') + e.amount;
+        cls = e.target === playerId ? 'dmg-in' : e.dot ? 'dmg-dot' : e.result === 'blocked' ? 'info' : 'dmg-out';
+      }
+    } else if (e.t === 'status' && (e.status === 'stagger' || e.status === 'root' || e.status === 'slow')) {
+      target = entities.get(e.target);
+      text = e.status === 'stagger' ? 'Staggered' : e.status === 'root' ? 'Rooted' : 'Slowed';
+      cls = 'info';
     }
+    if (!target) return;
+    const pos = center(target).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.9, 0));
     if (!text) return;
     const el = document.createElement('div');
     el.className = `floater ${cls}`;
@@ -106,7 +98,7 @@ export class Hud {
     this.floaters.push({ el, pos, t: 0, life: cls === 'counter' ? 1.3 : 0.9 });
   }
 
-  update(dt: number, camera: THREE.PerspectiveCamera, me: Combatant, abilities: PlayerAbilities, target: Combatant | null): void {
+  update(dt: number, camera: THREE.PerspectiveCamera, me: SimEntity, abilities: PlayerAbilities, target: SimEntity | null): void {
     this.hp.style.width = `${(me.hp / me.maxHp) * 100}%`;
     this.hpText.textContent = `${Math.ceil(me.hp)} / ${me.maxHp}`;
     this.chi.style.width = `${(me.chi / me.maxChi) * 100}%`;
@@ -130,7 +122,7 @@ export class Hud {
 
     if (target && !target.dead) {
       this.target.classList.remove('hidden');
-      this.targetName.textContent = `${target.name}${target.has('burn') ? ' 🔥' : ''}${target.has('root') ? ' ❄' : ''}${target.has('stagger') ? ' ✶' : ''}`;
+      this.targetName.textContent = `${target.name}${target.statuses.has('burn') ? ' 🔥' : ''}${target.statuses.has('root') ? ' ❄' : ''}${target.statuses.has('stagger') ? ' ✶' : ''}`;
       this.targetHp.style.width = `${(target.hp / target.maxHp) * 100}%`;
     } else this.target.classList.add('hidden');
 

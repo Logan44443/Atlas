@@ -1,22 +1,11 @@
 import * as THREE from 'three/webgpu';
-import fireKit from '@data/abilities/fire.json';
-import waterKit from '@data/abilities/water.json';
-import earthKit from '@data/abilities/earth.json';
-import airKit from '@data/abilities/air.json';
-import { elementPower, canBend, levelPower, type AbilityDef, type ElementId, type ElementKit, type Slot, type ElementContext } from '@shared/combat';
+import { canBend, type AbilityDef, type ElementContext, type ElementId, type ElementKit, type Slot } from '@shared/combat';
+import { CFG, KITS, center, isEnemy, type SimEntity } from '@shared/sim/combatSim';
 import type { Controls } from '../../engine/settings';
-import { CFG, type Combatant } from './combatant';
-import type { CombatSystem } from './combatSystem';
-import type { PlayerCombatant } from './actors';
-import { paletteFor } from './combatSystem';
-import type { Vfx } from './vfx';
+import type { Player } from '../player';
+import { gestureFor, type GestureStyle } from './combatView';
 
-export const KITS: Record<ElementId, ElementKit> = {
-  fire: fireKit as ElementKit,
-  water: waterKit as ElementKit,
-  earth: earthKit as ElementKit,
-  air: airKit as ElementKit,
-};
+export { KITS };
 
 export interface SlotState {
   def: AbilityDef;
@@ -25,64 +14,62 @@ export interface SlotState {
   affordable: boolean;
 }
 
-export interface CastFeedback {
-  /** 0..1 cast gesture progress for the avatar */
-  gesture: number;
-  style: 'push' | 'stomp' | 'spin' | 'breath';
-}
-
-const STYLE: Record<string, CastFeedback['style']> = { stomp: 'stomp', spin: 'spin', breath: 'breath', surge: 'breath' };
+/** Where cast requests go: the local sim offline, the shard server online. */
+export type CastSink = (slot: Slot, dir: THREE.Vector3) => void;
 
 /**
- * Turns the local player's input into casts. Aim comes from the camera with
- * soft target assist toward the enemy closest to the crosshair.
+ * Turns the local player's input into cast requests. Aim comes from the camera
+ * with soft target assist toward the enemy closest to the crosshair.
+ * Cooldowns are predicted here; the authority (sim or server) has the final
+ * say and a 'castFail' event resets the prediction.
  */
 export class PlayerAbilities {
   element: ElementId;
   kit!: ElementKit;
   private cooldowns = new Map<Slot, number>();
-  private combo = 0;
-  private comboT = 0;
   private gestureT = 0;
   private gestureDur = 0.3;
-  private gestureStyle: CastFeedback['style'] = 'push';
-  private pending: Array<{ t: number; fn: () => void }> = [];
-  target: Combatant | null = null;
+  private gestureStyle: GestureStyle = 'push';
+  target: SimEntity | null = null;
   private targetLockT = 0;
   lastFail = '';
   private failT = 0;
-  power = 1;
+  private aimDir = new THREE.Vector3(0, 0, 1);
 
   constructor(
-    private me: PlayerCombatant,
-    private combat: CombatSystem,
+    private me: () => SimEntity,
+    private entities: () => Iterable<SimEntity>,
     private controls: Controls,
     private camera: THREE.PerspectiveCamera,
-    private vfx: Vfx,
+    private player: Player,
     private context: () => ElementContext,
+    public sink: CastSink,
   ) {
-    this.element = me.element ?? 'fire';
+    this.element = me().element ?? 'fire';
     this.setElement(this.element);
   }
 
   setElement(el: ElementId): void {
     this.element = el;
-    this.me.element = el;
+    const me = this.me();
+    me.element = el;
+    // Offline the sim keeps its own cooldowns on the same entity; online the server clears them.
+    me.cooldowns.clear();
     this.kit = KITS[el];
     this.cooldowns.clear();
-    this.combo = 0;
   }
 
   slots(): Record<Slot, SlotState> {
     const out = {} as Record<Slot, SlotState>;
+    const me = this.me();
     for (const d of this.kit.abilities) {
       const cd = this.cooldowns.get(d.slot) ?? 0;
-      out[d.slot] = { def: d, cooldown: cd, ready: cd <= 0, affordable: this.me.chi >= d.chiCost };
+      out[d.slot] = { def: d, cooldown: cd, ready: cd <= 0, affordable: me.chi >= d.chiCost };
     }
     return out;
   }
 
-  get feedback(): CastFeedback {
+  get feedback(): { gesture: number; style: GestureStyle } {
     return { gesture: this.gestureT > 0 ? 1 - this.gestureT / this.gestureDur : 0, style: this.gestureStyle };
   }
 
@@ -90,19 +77,30 @@ export class PlayerAbilities {
     return this.failT > 0 ? this.lastFail : '';
   }
 
-  /** Camera ray -> aim direction from the caster's hand, with target assist. */
-  private aim(origin: THREE.Vector3): { dir: THREE.Vector3; target: Combatant | null } {
+  /** Latest aim direction (cones follow it while channelled). */
+  get aim(): THREE.Vector3 {
+    return this.aimDir;
+  }
+
+  private enemies(): SimEntity[] {
+    const me = this.me();
+    const out: SimEntity[] = [];
+    for (const e of this.entities()) if (!e.dead && isEnemy(me, e)) out.push(e);
+    return out;
+  }
+
+  /** Camera ray -> aim direction from the caster's chest, with target assist. */
+  private computeAim(): { dir: THREE.Vector3; target: SimEntity | null } {
+    const origin = center(this.me());
     const camDir = new THREE.Vector3();
     this.camera.getWorldDirection(camDir);
     const ta = CFG.targetAssist;
-    const cosA = Math.cos(THREE.MathUtils.degToRad(ta.angleDegrees));
-    let best: Combatant | null = null;
-    let bestDot = cosA;
-    const candidates = this.target && !this.target.dead ? [this.target, ...this.combat.enemiesOf(this.me)] : this.combat.enemiesOf(this.me);
-    for (const e of candidates) {
-      const to = e.center.clone().sub(this.camera.position);
-      const d = to.length();
-      if (d > ta.range + 8) continue;
+    let best: SimEntity | null = null;
+    let bestDot = Math.cos(THREE.MathUtils.degToRad(ta.angleDegrees));
+    const c = new THREE.Vector3();
+    for (const e of this.enemies()) {
+      const to = center(e, c).sub(this.camera.position);
+      if (to.length() > ta.range + 8) continue;
       const dot = to.normalize().dot(camDir);
       // A locked target gets a wider cone.
       const bonus = e === this.target && this.targetLockT > 0 ? 0.06 : 0;
@@ -111,23 +109,31 @@ export class PlayerAbilities {
         best = e;
       }
     }
-    if (best) return { dir: best.center.clone().sub(origin).normalize(), target: best };
+    if (best) return { dir: center(best).sub(origin).normalize(), target: best };
     // No target: aim at whatever is 40 m down the crosshair.
     const p = this.camera.position.clone().addScaledVector(camDir, 40);
     return { dir: p.sub(origin).normalize(), target: null };
   }
 
   cycleTarget(): void {
-    const enemies = this.combat.enemiesOf(this.me).sort((a, b) => a.center.distanceTo(this.me.center) - b.center.distanceTo(this.me.center));
+    const me = this.me();
+    const enemies = this.enemies().sort((a, b) => a.pos.distanceTo(me.pos) - b.pos.distanceTo(me.pos));
     if (!enemies.length) return;
     const i = this.target ? enemies.indexOf(this.target) : -1;
     this.target = enemies[(i + 1) % enemies.length];
     this.targetLockT = 6;
   }
 
-  private fail(msg: string): void {
+  private fail(msg: string): false {
     this.lastFail = msg;
     this.failT = 1.2;
+    return false;
+  }
+
+  /** The authority rejected a cast we predicted. */
+  onCastFail(slot: Slot, reason: string): void {
+    this.cooldowns.set(slot, 0);
+    if (reason !== 'cooldown') this.fail(reason);
   }
 
   update(dt: number, blockingHeld: boolean): void {
@@ -135,22 +141,15 @@ export class PlayerAbilities {
     this.gestureT = Math.max(0, this.gestureT - dt);
     this.failT = Math.max(0, this.failT - dt);
     this.targetLockT = Math.max(0, this.targetLockT - dt);
-    this.comboT -= dt;
-    if (this.comboT <= 0) this.combo = 0;
-    for (let i = this.pending.length - 1; i >= 0; i--) {
-      this.pending[i].t -= dt;
-      if (this.pending[i].t <= 0) {
-        const p = this.pending.splice(i, 1)[0];
-        p.fn();
-      }
-    }
     if (this.target?.dead) this.target = null;
     if (this.controls.pressed('target')) this.cycleTarget();
 
+    const a = this.computeAim();
+    this.aimDir.copy(a.dir);
     // Keep an "assist" target for the HUD even when not locked.
-    if (this.targetLockT <= 0) this.target = this.aim(this.me.center).target;
+    if (this.targetLockT <= 0) this.target = a.target;
 
-    if (this.me.dead || blockingHeld) return;
+    if (this.me().dead || blockingHeld) return;
     const order: Slot[] = ['ultimate', 'mobility', 'defense', 'control', 'heavy', 'basic'];
     for (const slot of order) {
       const want = slot === 'basic' ? this.controls.down('basic') : this.controls.pressed(slot);
@@ -162,114 +161,23 @@ export class PlayerAbilities {
     const def = this.kit.abilities.find((a) => a.slot === slot);
     if (!def) return false;
     if ((this.cooldowns.get(slot) ?? 0) > 0) return false;
-    if (this.me.has('stagger')) return this.fail('Staggered'), false;
-    const ctx = this.context();
-    if (!canBend(CFG, this.kit, ctx)) return this.fail('Earth needs solid ground'), false;
-    if (this.me.chi < def.chiCost) return this.fail('Not enough chi'), false;
-    if (def.kind === 'dash' && this.me.has('root')) return this.fail('Rooted'), false;
+    const me = this.me();
+    if (me.statuses.has('stagger')) return this.fail('Staggered');
+    if (!canBend(CFG, this.kit, this.context())) return this.fail('Earth needs solid ground');
+    if (me.chi < def.chiCost) return this.fail('Not enough chi');
+    if (def.kind === 'dash' && me.statuses.has('root')) return this.fail('Rooted');
 
-    this.me.chi -= def.chiCost;
     this.cooldowns.set(slot, def.cooldown);
-    this.power = elementPower(CFG, this.element, ctx) * levelPower(this.me.level);
-    this.cast(def);
+    let dir = this.aimDir.clone();
+    if (def.kind === 'dash') {
+      // Dash where you're moving; straight ahead if standing still.
+      const move = new THREE.Vector3(this.player.velocity.x, 0, this.player.velocity.z);
+      dir = move.lengthSq() > 1 ? move.normalize() : dir.setY(0).normalize();
+    } else this.player.faceFor(Math.atan2(dir.x, dir.z), Math.max(0.35, def.duration ?? 0));
+    const g = gestureFor(def);
+    this.gestureT = this.gestureDur = g.duration;
+    this.gestureStyle = g.style;
+    this.sink(slot, dir);
     return true;
-  }
-
-  private hand(): THREE.Vector3 {
-    const p = this.me.player;
-    const yaw = p.facing;
-    return this.me.center.clone().add(new THREE.Vector3(Math.cos(yaw) * -0.3 + Math.sin(yaw) * 0.5, 0.35, -Math.sin(yaw) * -0.3 + Math.cos(yaw) * 0.5));
-  }
-
-  private gesture(def: AbilityDef, dur = 0.3): void {
-    this.gestureT = this.gestureDur = dur;
-    this.gestureStyle = STYLE[def.anim] ?? 'push';
-  }
-
-  private cast(def: AbilityDef): void {
-    const player = this.me.player;
-    const el = this.element;
-    const power = this.power;
-    const { dir } = this.aim(this.me.center);
-    player.faceFor(Math.atan2(dir.x, dir.z), Math.max(0.35, def.duration ?? 0));
-    this.gesture(def, def.kind === 'cone' ? def.duration ?? 0.3 : def.kind === 'ring' ? 0.5 : 0.3);
-    this.me.lastCombat = this.combat.time;
-
-    switch (def.kind) {
-      case 'projectile': {
-        let mul = 1;
-        if (def.combo) {
-          this.combo = (this.combo % def.combo) + 1;
-          this.comboT = 1.0;
-          if (this.combo === def.combo) mul = 1 + (def.comboBonus ?? 0);
-        }
-        const release = () => {
-          const origin = this.hand();
-          const a = this.aim(origin);
-          const n = def.count ?? 1;
-          for (let i = 0; i < n; i++) {
-            const d = a.dir.clone();
-            if (n > 1) d.applyAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad((i - (n - 1) / 2) * (def.spread ?? 6)));
-            if (def.gravity) d.y += (def.gravity * (def.range ?? 20)) / (2 * (def.speed ?? 30) ** 2);
-            this.combat.spawnProjectile(this.me, def, el, origin, d, power * mul);
-          }
-          this.vfx.burst(paletteFor(el), origin, 8, 3, 0.4, 0.25);
-        };
-        if (def.windup) {
-          this.pending.push({ t: def.windup, fn: release });
-          this.vfx.burst(paletteFor(el), this.hand(), 20, 1.5, 0.5, def.windup);
-        } else release();
-        break;
-      }
-      case 'melee': {
-        let mul = 1;
-        if (def.combo) {
-          this.combo = (this.combo % def.combo) + 1;
-          this.comboT = 1.0;
-          if (this.combo === def.combo) mul = 1 + (def.comboBonus ?? 0);
-        }
-        this.combat.melee(this.me, def, el, dir, power, mul);
-        break;
-      }
-      case 'dash': {
-        const move = new THREE.Vector3(player.velocity.x, 0, player.velocity.z);
-        const d = move.lengthSq() > 1 ? move.normalize() : dir.clone().setY(0).normalize();
-        player.dash(d, def.distance ?? 8, def.duration ?? 0.3, def.lift ?? 0);
-        const pal = paletteFor(el);
-        const dur = def.duration ?? 0.3;
-        // Trail for the dash duration.
-        let t = 0;
-        const step = () => {
-          t += 1 / 60;
-          this.vfx.trail(pal, this.me.feet.clone().setY(this.me.feet.y + 0.4), d, 0.8, 1 / 60, 400);
-          if (t < dur) this.pending.push({ t: 1 / 60, fn: step });
-        };
-        step();
-        if (def.lift) this.vfx.ring(pal, this.me.feet, 1.2, 40, 6, 0.9);
-        break;
-      }
-      case 'shield':
-        this.combat.shield(this.me, def, el);
-        break;
-      case 'ring':
-        this.combat.spawnArea(this.me, def, el, this.me.feet, power, false);
-        break;
-      case 'cone': {
-        this.combat.spawnArea(
-          this.me,
-          def,
-          el,
-          this.me.feet,
-          power,
-          true,
-          () => this.aim(this.me.center).dir,
-          () => this.hand(),
-        );
-        if (def.selfHeal) {
-          this.me.hp = Math.min(this.me.maxHp, this.me.hp + def.selfHeal);
-        }
-        break;
-      }
-    }
   }
 }

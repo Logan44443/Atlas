@@ -9,10 +9,17 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "world": "tsx scripts/build-world.ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "server": "tsx server/index.ts",
+    "server:watch": "tsx watch server/index.ts",
+    "dev:all": "node scripts/dev-all.mjs"
   },
   "dependencies": {
+    "@colyseus/core": "0.16.26",
+    "@colyseus/schema": "3.0.76",
+    "@colyseus/ws-transport": "0.16.5",
     "@dimforge/rapier3d-compat": "^0.19.3",
+    "colyseus.js": "0.16.22",
     "three": "^0.185.1"
   },
   "devDependencies": {

@@ -1,6 +1,5 @@
 import * as THREE from 'three/webgpu';
 import worldData from '@data/world.json';
-import combatData from '@data/combat.json';
 import { TerrainSampler, type TerrainConfig } from '@shared/terrain';
 import { GameRenderer } from './engine/renderer';
 import { Input } from './engine/input';
@@ -21,10 +20,15 @@ import { Avatar } from './game/avatar';
 import { Nameplate } from './game/nameplate';
 import { ThirdPersonCamera } from './game/thirdPersonCamera';
 import { Vfx } from './game/combat/vfx';
-import { CombatSystem } from './game/combat/combatSystem';
-import { PlayerCombatant, Dummy } from './game/combat/actors';
+import { CombatView } from './game/combat/combatView';
+import { DummyView } from './game/combat/dummyView';
 import { PlayerAbilities } from './game/combat/abilities';
-import { CFG } from './game/combat/combatant';
+import { LocalCombat, type CombatHost } from './game/combat/host';
+import { CFG, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
+import characterData from '@data/character.json';
+import { elementContextAt, worldDays } from '@shared/clock';
+import { NetCombat, defaultServerUrl } from './net/netCombat';
+import { RemotePlayers } from './game/remotePlayers';
 import { Hud } from './ui/hud';
 import { DebugOverlay } from './ui/debug';
 import { ChunkMinimap } from './ui/minimap';
@@ -108,53 +112,125 @@ async function main() {
   avatar.root.add(nameplate.sprite);
   scene.add(avatar.root);
 
-  // Combat (Phase 4). Runs locally for now; moves server-side in Phase 5.
+  // Combat. The rules live in shared/sim; offline they run in this tab.
   const vfx = new Vfx();
   scene.add(vfx.group);
-  const combat = new CombatSystem(vfx, groundAt);
-  scene.add(combat.group);
-  const me = new PlayerCombatant(player, settings.data.name, settings.data.element);
-  combat.add(me);
-  const dummies: Dummy[] = [];
-  for (const d of combatData.dummies) {
-    const home = new THREE.Vector3(spawn.x + d.offset[0], 0, spawn.z + d.offset[1]);
-    home.y = groundAt(home.x, home.z);
-    const dummy = new Dummy(d, home, groundAt);
-    dummies.push(dummy);
-    combat.add(dummy);
-    scene.add(dummy.root);
-  }
-  const elementContext = () => {
-    const f = player.renderPos;
-    let nearWater = player.swimming;
-    const r = CFG.elements.water.nearWaterMeters;
-    for (let k = 0; k < 8 && !nearWater; k++) {
-      const a = (k / 8) * Math.PI * 2;
-      if (groundAt(f.x + Math.cos(a) * r, f.z + Math.sin(a) * r) < worldData.seaLevel) nearWater = true;
-    }
-    const ny = sampler.slopeY(f.x, f.z);
-    const onRock = ny < worldData.biomes.rockSlope + 0.05 || f.y > worldData.biomes.grassMaxHeight;
-    return { night: dayNight.nightFactor, sunHeight: dayNight.sunDir.y, moonPhase: dayNight.moonPhase, nearWater, onRock, grounded: player.grounded };
-  };
-  const abilities = new PlayerAbilities(me, combat, controls, camera, vfx, elementContext);
+  let host: CombatHost = new LocalCombat(settings.data.name, settings.data.element, spawn, groundAt);
+  const elementContext = () =>
+    elementContextAt(sampler, worldData, CFG.elements.water.nearWaterMeters, player.renderPos, dayNight.days, player.swimming, player.grounded, groundAt);
+  const abilities = new PlayerAbilities(
+    () => host.me,
+    () => host.entities.values(),
+    controls,
+    camera,
+    player,
+    elementContext,
+    (slot, dir) => host.cast(slot, dir),
+  );
+  const view = new CombatView(vfx, () => host.entities, (e) => (e === host.me ? abilities.aim : yawDir(e.yaw)), () => host.me.id);
+  scene.add(view.group);
   const hud = new Hud(settings);
-  combat.on((e) => {
-    hud.onEvent(e, me.id);
-    if (e.kind === 'death' && e.target === me) {
-      // Phase 4 has no death penalty yet: get back up at spawn.
-      setTimeout(() => {
-        me.dead = false;
-        me.hp = me.maxHp;
-        me.chi = me.maxChi;
-        me.statuses.clear();
-        player.teleport(spawn.x, spawn.z);
-      }, 2000);
+  const remotes = new RemotePlayers(scene, view);
+  const dummyViews = new Map<string, DummyView>();
+  const yawDirV = new THREE.Vector3();
+  function yawDir(yaw: number) {
+    return yawDirV.set(Math.sin(yaw), 0, Math.cos(yaw));
+  }
+
+  /** Push the controller's state into the local combat entity, and statuses back out. */
+  function syncMe() {
+    const me = host.me;
+    me.pos.copy(player.renderPos);
+    me.yaw = player.facing;
+    me.grounded = player.grounded;
+    me.ctx = elementContext();
+    const wasBlocking = me.blocking;
+    me.blocking = player.blocking && !me.dead;
+    if (me.blocking && !wasBlocking) me.blockStart = host.time;
+    const dodgeT = player.dodgeProgress * characterData.dodge.duration;
+    me.invulnerable = player.isDodging && dodgeT >= CFG.dodgeInvulnerable[0] && dodgeT <= CFG.dodgeInvulnerable[1];
+    const slow = me.statuses.get('slow');
+    player.moveScale = slow ? 1 - slow.amount : 1;
+    player.rooted = me.statuses.has('root');
+    player.staggered = me.statuses.has('stagger');
+    if (me.pendingImpulse.lengthSq() > 0) {
+      player.knockback(me.pendingImpulse.clone());
+      me.pendingImpulse.set(0, 0, 0);
     }
-  });
+  }
+
+  function syncEntityViews() {
+    for (const e of host.entities.values()) {
+      if (e.kind === 'dummy' && !dummyViews.has(e.id)) {
+        const v = new DummyView(e);
+        dummyViews.set(e.id, v);
+        scene.add(v.root);
+      }
+    }
+    for (const [id, v] of dummyViews) {
+      if (!host.entities.has(id)) {
+        v.dispose();
+        dummyViews.delete(id);
+      }
+    }
+  }
+
+  const eventTaps: Array<(e: SimEvent) => void> = [];
+  function onCombatEvent(e: SimEvent) {
+    for (const tap of eventTaps) tap(e);
+    view.handle(e);
+    hud.onEvent(e, host.entities, host.me.id);
+    const me = host.me;
+    switch (e.t) {
+      case 'castFail':
+        if (e.caster === me.id) abilities.onCastFail(e.slot, e.reason);
+        break;
+      case 'dash':
+        if (e.owner === me.id) player.dash(new THREE.Vector3(...e.dir), e.distance, e.duration, e.lift);
+        break;
+      case 'impulse':
+        dummyViews.get(e.target)?.shake(Math.hypot(...e.v));
+        break;
+      case 'respawn':
+        if (e.target === me.id) player.teleport(spawn.x, spawn.z);
+        break;
+    }
+  }
+
+  // Multiplayer: join a shard if a server answers, otherwise keep playing offline.
+  const params = new URLSearchParams(location.search);
+  let netStatus = params.has('offline') ? 'offline (?offline)' : 'connecting…';
+  function goOffline(reason: string) {
+    netStatus = `offline (${reason})`;
+    host = new LocalCombat(settings.data.name, settings.data.element, spawn, groundAt);
+    abilities.setElement(settings.data.element);
+    console.info(`[net] ${netStatus}`);
+  }
+  async function connect() {
+    try {
+      const net = await NetCombat.connect(defaultServerUrl(), { name: settings.data.name, element: settings.data.element }, player, params.get('shard'));
+      host = net;
+      abilities.setElement(settings.data.element);
+      netStatus = `shard ${net.shard}`;
+      net.onClose = () => goOffline('disconnected');
+      console.info(`[net] joined ${netStatus} as ${net.me.id}`);
+      if (!loading) player.teleport(net.me.pos.x, net.me.pos.z);
+    } catch (err) {
+      goOffline((err as Error)?.message ?? 'no server');
+    }
+  }
+  const netReady = params.has('offline') ? Promise.resolve() : connect();
+
+  /** Move the local player anywhere (tests, debugging); dev shards accept it. */
+  function tp(x: number, z: number) {
+    player.teleport(x, z);
+    if (host instanceof NetCombat) host.teleport(x, groundAt(x, z), z);
+  }
 
   settings.onChange((s) => {
     nameplate.set(s.name);
-    me.name = s.name;
+    host.me.name = s.name;
+    if (host instanceof NetCombat) host.room.send('profile', { name: s.name, element: s.element });
     if (s.element !== abilities.element) {
       abilities.setElement(s.element);
       scene.remove(avatar.root);
@@ -204,7 +280,11 @@ async function main() {
   Object.assign(window, {
     __fw: {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
-      combat, me, dummies, abilities, vfx, elementContext,
+      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady,
+      get netStatus() { return netStatus; },
+      get host() { return host; },
+      get me() { return host.me; },
+      get dummies() { return [...host.entities.values()].filter((e: SimEntity) => e.kind === 'dummy'); },
       get avatar() { return avatar; },
       get preset() { return presetName; },
       get freeCam() { return freeCam; },
@@ -234,23 +314,30 @@ async function main() {
     }
 
     if (!loading) {
-      me.sync();
+      const me = host.me;
       if (freeCam) fly.update(dt);
       else if (!me.dead) player.update(dt, tpc.yaw);
-      // Block stance: remember when it started so perfect-timed blocks can counter.
-      const wasBlocking = me.blocking;
-      me.blocking = player.blocking && !me.dead;
-      if (me.blocking && !wasBlocking) me.blockStart = combat.time;
+      syncMe();
       if (!freeCam) abilities.update(dt, me.blocking);
-      combat.update(dt);
-      for (const d of dummies) d.update(dt, combat, me);
+      for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
+      if (host instanceof NetCombat) {
+        for (const c of host.corrections.splice(0)) {
+          console.warn(`[net] server corrected position: ${c.reason}`);
+          player.teleport(c.p[0], c.p[2]);
+        }
+        dayNight.days = worldDays(host.serverNow);
+      }
+      remotes.update(dt, host.entities, host.me.id);
+      syncEntityViews();
+      for (const v of dummyViews.values()) v.update(dt);
+      view.update(dt);
       vfx.update(dt);
       avatar.root.position.copy(player.renderPos);
       avatar.root.rotation.y = player.facing;
       const fb = abilities.feedback;
       avatar.update(dt, { ...player.pose(), cast: fb.gesture, castStyle: fb.style });
       avatar.root.rotation.z = me.dead ? Math.PI / 2 : 0;
-      hud.update(dt, camera, me, abilities, abilities.target);
+      hud.update(dt, camera, host.me, abilities, abilities.target);
       if (!freeCam) tpc.update(dt, player);
     } else {
       tpc.update(0, player);
@@ -274,7 +361,7 @@ async function main() {
       if (streamer.nearReady() && physics.terrainColliderCount > 0) {
         loading = false;
         streamer.applyBudget = 3;
-        player.teleport(spawn.x, spawn.z);
+        player.teleport(host.me.pos.x || spawn.x, host.me.pos.z || spawn.z);
         gr.render();
         document.getElementById('loading')?.classList.add('done');
         updateHint();
@@ -323,7 +410,8 @@ async function main() {
           moon: phase > 0.95 ? 'Full' : phase < 0.05 ? 'New' : `${Math.round(phase * 100)}%`,
           pos: `${pp.x.toFixed(0)}, ${pp.y.toFixed(1)}, ${pp.z.toFixed(0)}`,
           extra: [
-            ['Combat', `${abilities.element} x${abilities.power.toFixed(2)} vfx ${vfx.count} proj ${combat.stats.projectiles}`],
+            ['Combat', `${abilities.element} vfx ${vfx.count} proj ${view.stats.projectiles} ${host.online ? 'online' : 'offline'}`],
+            ['Net', host instanceof NetCombat ? `${netStatus} rtt ${host.rtt} ms, ${remotes.count} others` : netStatus],
             ['Player', `${player.grounded ? 'grounded' : player.swimming ? 'swimming' : 'air'} ${Math.hypot(player.velocity.x, player.velocity.z).toFixed(1)} m/s${freeCam ? ' (free cam)' : ''}`],
             ['Chunks', `${streamer.counts.near}/${streamer.counts.mid}/${streamer.counts.far} <span class="k">n/m/f</span> phys ${physics.terrainColliderCount}`],
             ['Queue', `${streamer.counts.queued} build ${streamer.counts.building} pre ${streamer.counts.prefetch}`],

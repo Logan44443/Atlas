@@ -26,7 +26,14 @@ page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}`));
 
 const t0 = Date.now();
 await page.goto(url, { waitUntil: 'load' });
-await page.waitForSelector('#loading.done', { timeout: 180000 });
+try {
+  await page.waitForSelector('#loading.done', { timeout: 240000 });
+} catch (e) {
+  console.log('never finished loading:', await page.evaluate(() => document.getElementById('loading-text')?.textContent));
+  console.log(errors.concat(logs.slice(-15)).join('\n'));
+  await browser.close();
+  process.exit(1);
+}
 console.log(`first frame after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
 const scenario = process.env.SCENARIO;

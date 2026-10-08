@@ -1,0 +1,19 @@
+{
+  "_comment": "Multiplayer tuning. Rates in Hz, distances in chunks (64 m) unless noted.",
+  "port": 2567,
+  "maxClients": 80,
+  "tickRate": 20,
+  "patchRate": 20,
+  "moveSendRate": 20,
+  "interpolationDelayMs": 110,
+  "interestAddChunks": 3,
+  "interestRemoveChunks": 4,
+  "eventRadiusMeters": 160,
+  "connectTimeoutMs": 2500,
+  "movement": {
+    "speedTolerance": 1.35,
+    "slackMeters": 1.5,
+    "maxAboveGround": 40,
+    "maxBelowGround": 1.5
+  }
+}

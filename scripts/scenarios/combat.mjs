@@ -6,7 +6,11 @@ export default async function (page, { outDir }) {
     const f = window.__fw;
     f.dayNight.hour = 11; f.dayNight.timeScale = 0;
     f.tpc.yaw = 0; f.tpc.pitch = -0.12;
-    f.combat.on((e) => window.__log({ kind: e.kind, src: e.source?.id, target: e.target.id, amount: e.amount ?? 0, text: e.text ?? '', blocking: f.me.blocking, since: +(f.combat.time - f.me.blockStart).toFixed(2) }));
+    f.eventTaps.push((e) => {
+      if (e.t !== 'hit' && e.t !== 'status' && e.t !== 'death') return;
+      const kind = e.t === 'hit' ? (e.result === 'hit' ? 'damage' : e.result) : e.t;
+      window.__log({ kind, src: e.source ?? null, target: e.target, amount: e.amount ?? 0, text: e.t === 'status' ? e.status : e.dot ? 'burn' : '', blocking: f.me.blocking, since: +(f.host.time - f.me.blockStart).toFixed(2) });
+    });
   });
   await page.waitForTimeout(1000);
   const hp = () => page.evaluate(() => window.__fw.dummies.map((d) => `${d.id}:${d.hp}${d.dead ? '(down)' : ''}`).join(' '));
@@ -14,17 +18,17 @@ export default async function (page, { outDir }) {
     events.length = 0;
   await page.evaluate(() => {
     const f = window.__fw;
-    f.combat.areas.length = 0;
-    window.__blockStartT = f.combat.time;
+    f.host.sim.areas.length = 0;
+    window.__blockStartT = f.host.time;
     f.player.teleport(0, -6);
     const canvas = f.renderer.domElement;
     let armed = true;
     const triggers = [1.4, 3.5, 1.0, 1.4];
     let attempt = 0;
     const tick = () => {
-      const projs = f.combat.projectiles.filter((p) => p.owner.id === 'dummy_c');
+      const projs = f.host.sim.projectiles.filter((p) => p.owner.id === 'dummy_c');
       for (const p of projs) {
-        if (armed && p.pos.distanceTo(f.me.center) < triggers[attempt % triggers.length]) {
+        if (armed && p.pos.distanceTo(f.me.pos.clone().setY(f.me.pos.y + 1.08)) < triggers[attempt % triggers.length]) {
           attempt++;
           armed = false;
           canvas.dispatchEvent(new MouseEvent('mousedown', { button: 2, bubbles: true }));
@@ -36,7 +40,7 @@ export default async function (page, { outDir }) {
     tick();
   });
   // Wait on simulated time: headless frames are slow.
-  await page.waitForFunction(() => window.__fw.combat.time > window.__blockStartT + 14, null, { timeout: 240000, polling: 500 });
+  await page.waitForFunction(() => window.__fw.host.time > window.__blockStartT + 14, null, { timeout: 240000, polling: 500 });
   await page.evaluate(() => { window.__stopBlock = true; });
   console.log('block test events:', events.filter((e) => e.target === 'player' || e.src === 'player').map((e) => e.kind + (e.text ? ':' + e.text : '') + '@' + e.target + '<' + e.src + ':' + e.amount + (e.target === 'player' ? `(blk ${e.blocking} ${e.since})` : '')).join(', '));
   await page.screenshot({ path: `${outDir}/combat-block.png` });

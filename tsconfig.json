@@ -19,5 +19,5 @@
       "@data/*": ["data/*"]
     }
   },
-  "include": ["client/src", "shared", "scripts", "vite.config.ts"]
+  "include": ["client/src", "shared", "server", "scripts", "vite.config.ts"]
 }
