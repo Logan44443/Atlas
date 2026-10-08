@@ -1,6 +1,7 @@
 // Wire protocol between the browser and a shard (WorldRoom).
 import netData from '../data/net.json';
 import type { Slot } from './combat';
+import type { Progress } from './progression';
 import type { SimEvent } from './sim/combatSim';
 
 export const NET = netData;
@@ -44,6 +45,42 @@ export interface WelcomeMsg {
   characterId: string;
   faction: string;
   level: number;
+  /** level, xp, mastery, discovered landmarks */
+  progress: Progress;
+}
+
+/** Server -> client: XP gained (amount may be 0 with a reason, e.g. anti-griefing). */
+export interface XpMsg {
+  amount: number;
+  reason: string;
+  levelUp: number;
+  progress: Progress;
+}
+
+export interface PartyMember {
+  id: string;
+  name: string;
+  element: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  x: number;
+  z: number;
+  dead: boolean;
+}
+
+/** Server -> client: your party (sent on change and once a second), or null when you have none. */
+export interface PartyInfo {
+  id: string;
+  leader: string;
+  members: PartyMember[];
+}
+
+/** Server -> client: someone invited you to their party. */
+export interface InviteMsg {
+  from: string;
+  name: string;
+  expires: number;
 }
 
 /** Server -> client: the move was rejected, snap back here. */

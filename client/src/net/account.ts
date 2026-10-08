@@ -11,6 +11,9 @@ export interface Character {
   faction: FactionId;
   level: number;
   pos: [number, number, number] | null;
+  xp?: number;
+  mastery?: Record<string, number>;
+  discovered?: string[];
 }
 
 export interface AccountInfo {
@@ -150,12 +153,12 @@ export class AccountClient {
   }
 
   /** Offline characters remember where they were. */
-  saveLocalPosition(id: string, pos: [number, number, number], name?: string): void {
+  /** Offline characters keep position, name and progress in this browser. */
+  saveLocalCharacter(id: string, patch: Partial<Pick<Character, 'pos' | 'name' | 'level' | 'xp' | 'mastery' | 'discovered'>>): void {
     const list = this.localCharacters();
     const c = list.find((x) => x.id === id);
     if (!c) return;
-    c.pos = pos;
-    if (name) c.name = name;
+    Object.assign(c, patch);
     this.saveLocal(list);
   }
 

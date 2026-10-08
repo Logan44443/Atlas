@@ -1,8 +1,11 @@
 import * as THREE from 'three/webgpu';
 import type { AbilityDef, ElementId } from '@shared/combat';
-import { KITS, center, handOf, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
+import { KITS, COMBOS, center, handOf, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
 import { fresnel } from './shaders';
-import { PALETTE, type Palette, type Vfx } from './vfx';
+import { PALETTE, paletteOf, type Palette, type Vfx } from './vfx';
+
+const LEVEL_PALETTE = paletteOf('#ffd76a', true);
+const COMBO_PALETTES = new Map(COMBOS.map((c) => [c.id, { pal: paletteOf(c.color, c.elements.includes('fire')), soft: !c.elements.includes('fire') }]));
 
 export function paletteFor(el: ElementId | null): Palette {
   return el ? PALETTE[el] : PALETTE.hit;
@@ -66,6 +69,7 @@ export class CombatView {
   readonly group = new THREE.Group();
   private projectiles = new Map<number, ProjView>();
   private areas: AreaView[] = [];
+  private combos: Array<{ id: string; pos: THREE.Vector3; radius: number; remaining: number }> = [];
   private dashes: DashView[] = [];
   private shields = new Map<string, { mesh: THREE.Mesh; remaining: number }>();
   private gestures = new Map<string, { t: number; dur: number; style: GestureStyle }>();
@@ -170,6 +174,21 @@ export class CombatView {
           range: ev.range, angle: ev.angle, swirl: ev.swirl, follow: ev.follow, time: 0,
         });
         break;
+      case 'combo': {
+        const pos = v3(ev.pos);
+        this.combos.push({ id: ev.combo, pos, radius: ev.radius, remaining: ev.duration });
+        const c = COMBO_PALETTES.get(ev.combo);
+        if (c) this.vfx.burst(c.pal, tmp.copy(pos).setY(pos.y + 1), 50, 9, 1.2, 0.8);
+        break;
+      }
+      case 'level': {
+        const t = this.ent(ev.target);
+        if (t) {
+          this.vfx.ring(LEVEL_PALETTE, t.pos, 1.4, 80, 5, 0.5);
+          this.vfx.burst(LEVEL_PALETTE, center(t, tmp), 60, 6, 0.6, 1);
+        }
+        break;
+      }
       case 'melee': {
         const o = v3(ev.pos);
         const flat = v3(ev.dir);
@@ -257,6 +276,16 @@ export class CombatView {
         this.vfx.cone(pal, handOf(owner, dir, tmp), dir, a.range, a.angle, Math.round(dt * 300));
       }
     }
+    for (let i = this.combos.length - 1; i >= 0; i--) {
+      const c = this.combos[i];
+      c.remaining -= dt;
+      const look = COMBO_PALETTES.get(c.id);
+      if (c.remaining <= 0 || !look) {
+        this.combos.splice(i, 1);
+        continue;
+      }
+      this.vfx.cloud(look.pal, c.pos, c.radius, Math.max(1, Math.round(dt * c.radius * 14)), look.soft);
+    }
     for (let i = this.dashes.length - 1; i >= 0; i--) {
       const d = this.dashes[i];
       d.remaining -= dt;
@@ -285,6 +314,6 @@ export class CombatView {
   }
 
   get stats() {
-    return { projectiles: this.projectiles.size, areas: this.areas.length };
+    return { projectiles: this.projectiles.size, areas: this.areas.length, combos: this.combos.length };
   }
 }

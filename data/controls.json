@@ -18,6 +18,10 @@
     { "id": "target",       "label": "Cycle target",       "group": "Interface", "keys": ["Tab"] },
     { "id": "interact",     "label": "Interact",           "group": "Interface", "keys": ["KeyG"] },
     { "id": "pvpFlag",      "label": "Toggle PvP flag",    "group": "Interface", "keys": ["KeyP"] },
+    { "id": "mastery",      "label": "Mastery tree",       "group": "Interface", "keys": ["KeyK"] },
+    { "id": "partyInvite",  "label": "Invite to party (player in front)", "group": "Interface", "keys": ["KeyI"] },
+    { "id": "acceptInvite", "label": "Accept party invite", "group": "Interface", "keys": ["KeyY"] },
+    { "id": "declineInvite","label": "Decline party invite", "group": "Interface", "keys": ["KeyN"] },
     { "id": "freeCamera",   "label": "Debug free camera",  "group": "Interface", "keys": ["F2"] }
   ],
   "reserved": ["Escape", "F3", "F4", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"],

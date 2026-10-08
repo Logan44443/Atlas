@@ -47,7 +47,8 @@ export default async function (page, { outDir }) {
   await page.evaluate(() => { window.__fw.player.teleport(0, 0); window.__fw.me.hp = 200; });
 
   for (const el of ['fire', 'water', 'earth', 'air']) {
-    await page.evaluate((el) => { const s = window.__fw.settings; s.data.element = el; s.save(); window.__fw.me.chi = 100; window.__fw.dummies.forEach((d) => { d.hp = d.maxHp; d.dead = false; }); }, el);
+    // Elements are fixed per character now; switch the test character's kit directly.
+    await page.evaluate((el) => { window.__fw.abilities.setElement(el); window.__fw.me.chi = 100; window.__fw.dummies.forEach((d) => { d.hp = d.maxHp; d.dead = false; }); }, el);
     await page.waitForTimeout(300);
     events.length = 0;
     // Basic x3 (hold left mouse), then each ability.
@@ -68,7 +69,8 @@ export default async function (page, { outDir }) {
     await page.waitForTimeout(800);
     const dmg = events.filter((e) => e.kind === 'damage' && e.target !== 'player').reduce((a, e) => a + e.amount, 0);
     const kinds = [...new Set(events.map((e) => e.kind + (e.text ? ':' + e.text : '')))].join(',');
-    console.log(`${el}: dealt ${dmg}, events [${kinds}], dummies ${await hp()}`);
+    const kit = await page.evaluate(() => window.__fw.me.element);
+    console.log(`${el}: dealt ${dmg} (kit ${kit}), events [${kinds}], dummies ${await hp()}`);
     await page.evaluate(() => window.__fw.player.teleport(0, 0));
     await page.evaluate(() => { window.__fw.tpc.yaw = 0; });
   }

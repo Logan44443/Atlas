@@ -13,6 +13,23 @@ import {
   type AbilityDef, type CombatConfig, type ElementContext, type ElementId, type ElementKit, type Slot, type StatusDef, type StatusType,
 } from '../combat';
 import { zoneAt, PVP } from '../factions';
+import { modKit, NO_MODS, PROG, type Mods } from '../progression';
+import comboData from '../../data/partyCombos.json';
+
+export interface PartyCombo {
+  id: string;
+  name: string;
+  elements: ElementId[];
+  radius: number;
+  duration: number;
+  tick: number;
+  damage: number;
+  status?: StatusDef;
+  color: string;
+}
+export const COMBOS = comboData.combos as PartyCombo[];
+export const comboFor = (a: ElementId, b: ElementId): PartyCombo | undefined =>
+  a === b ? undefined : COMBOS.find((c) => c.elements.includes(a) && c.elements.includes(b));
 
 export const CFG = combatData as unknown as CombatConfig;
 export const KITS: Record<ElementId, ElementKit> = {
@@ -86,6 +103,13 @@ export interface SimEntity {
   yaw: number;
   /** 0..1 attack telegraph (dummies), replicated so players can time blocks. */
   windup: number;
+  /** Mastery modifiers (players); NO_MODS otherwise. Set through setMods(). */
+  mods: Mods;
+  /** Party id ('' = none). Party members' different elements combine into combos. */
+  party: string;
+  /** Last party hit on this entity, for combo detection. */
+  mark: { source: string; element: ElementId; party: string; t: number } | null;
+  comboReadyAt: number;
 }
 
 /**
@@ -114,7 +138,9 @@ export type SimEvent =
   | { t: 'proj'; id: number; owner: string; ability: string; element: ElementId; pos: [number, number, number]; vel: [number, number, number]; radius: number; gravity: number }
   | { t: 'projEnd'; id: number; pos: [number, number, number]; splash: number; element: ElementId }
   | { t: 'reflect'; id: number; owner: string; pos: [number, number, number]; vel: [number, number, number] }
-  | { t: 'hit'; target: string; source: string | null; amount: number; element: ElementId | null; result: 'hit' | 'blocked' | 'perfect' | 'dodged'; dot?: boolean }
+  | { t: 'hit'; target: string; source: string | null; amount: number; element: ElementId | null; result: 'hit' | 'blocked' | 'perfect' | 'dodged' | 'miss'; dot?: boolean; crit?: boolean }
+  | { t: 'level'; target: string; level: number }
+  | { t: 'combo'; id: number; combo: string; name: string; pos: [number, number, number]; radius: number; duration: number; members: [string, string] }
   | { t: 'status'; target: string; status: StatusType; duration: number }
   | { t: 'area'; id: number; owner: string; ability: string; element: ElementId; kind: 'ring' | 'cone'; pos: [number, number, number]; duration: number; radius: number; range: number; angle: number; swirl: boolean; follow: boolean }
   | { t: 'melee'; owner: string; element: ElementId; pos: [number, number, number]; dir: [number, number, number]; range: number; angle: number }
@@ -190,9 +216,26 @@ export function createEntity(p: Partial<SimEntity> & Pick<SimEntity, 'id' | 'nam
     protectedUntil: 0,
     yaw: 0,
     windup: 0,
+    mods: NO_MODS,
+    party: '',
+    mark: null,
+    comboReadyAt: 0,
     ...p,
   };
 }
+
+/** Apply mastery modifiers to a player: max health/chi follow, keeping the current fill ratio. */
+export function setMods(e: SimEntity, mods: Mods): void {
+  const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+  e.mods = mods;
+  e.maxHp = Math.round(CFG.health * (1 + mods.hp));
+  e.hp = e.dead ? 0 : Math.max(1, Math.round(e.maxHp * hpRatio));
+  e.maxChi = CFG.chi.max + mods.maxChi;
+  e.chi = Math.min(e.chi, e.maxChi);
+}
+
+/** The caster's abilities with mastery applied. */
+export const kitOf = (e: SimEntity): ElementKit => modKit(KITS[e.element ?? 'fire'], e.mods);
 
 export const center = (e: SimEntity, out = new Vector3()) => out.copy(e.pos).setY(e.pos.y + e.height * 0.6);
 /** Where projectiles leave the caster: chest height, slightly forward along `dir`. */
@@ -238,7 +281,7 @@ export class CombatSim {
   cast(caster: SimEntity, slot: Slot, dirIn: Vector3): boolean {
     const fail = (reason: string) => (this.events.push({ t: 'castFail', caster: caster.id, slot, reason }), false);
     if (caster.dead || !caster.element) return false;
-    const kit = KITS[caster.element];
+    const kit = kitOf(caster);
     const def = kit.abilities.find((a) => a.slot === slot);
     if (!def) return false;
     if ((caster.cooldowns.get(slot) ?? 0) > 0.05) return fail('cooldown');
@@ -376,7 +419,14 @@ export class CombatSim {
       return 'avoided';
     }
     src.lastCombat = target.lastCombat = this.time;
+    // Blinded attackers (steam, sandstorm) miss some of their hits.
+    if (src.statuses.has('blind') && Math.random() < comboData.blind.missChance) {
+      this.events.push({ t: 'hit', target: target.id, source: src.id, amount: 0, element, result: 'miss' });
+      return 'avoided';
+    }
     let dmg = ability.damage * power * matchup(CFG, element, target.element);
+    const crit = src.mods.crit > 0 && Math.random() < src.mods.crit;
+    if (crit) dmg *= PROG.crit.multiplier;
     // Anti-griefing: much higher-level players hit low-level ones softly.
     if (src.kind === 'player' && target.kind === 'player' && src.level - target.level >= PVP.lowLevelGap) dmg *= PVP.lowLevelDamageScale;
     let result: 'hit' | 'blocked' = 'hit';
@@ -393,9 +443,11 @@ export class CombatSim {
       result = 'blocked';
     }
     if (target.shield) dmg *= 1 - target.shield.reduction;
+    dmg *= 1 - target.mods.armor;
     dmg = Math.max(1, Math.round(dmg));
     target.hp = Math.max(0, target.hp - dmg);
-    this.events.push({ t: 'hit', target: target.id, source: src.id, amount: dmg, element, result });
+    this.events.push({ t: 'hit', target: target.id, source: src.id, amount: dmg, element, result, ...(crit ? { crit } : {}) });
+    if (!ability.partyCombo) this.comboCheck(src, target, element);
     if (ability.status) this.applyStatus(target.id, src, ability.status);
     if (ability.knockback && !target.blocking) {
       const v = dir.clone().setY(0).normalize().multiplyScalar(ability.knockback).setY(ability.knockback * 0.35);
@@ -403,6 +455,38 @@ export class CombatSim {
     }
     if (target.hp <= 0) this.kill(target, src.id);
     return 'hit';
+  }
+
+  /**
+   * Party combos: a hit from one member on a target another member just hit
+   * with a different element bursts into that pair's combo at the target.
+   */
+  private comboCheck(src: SimEntity, target: SimEntity, element: ElementId): void {
+    if (!src.party || src.kind !== 'player' || target.dead) return;
+    const m = target.mark;
+    if (m && m.party === src.party && m.source !== src.id && this.time - m.t <= comboData.windowSeconds && this.time >= target.comboReadyAt) {
+      const def = comboFor(m.element, element);
+      if (def) {
+        target.comboReadyAt = this.time + comboData.targetCooldown;
+        target.mark = null;
+        this.spawnCombo(src, def, target.pos, [m.source, src.id]);
+        return;
+      }
+    }
+    target.mark = { source: src.id, element, party: src.party, t: this.time };
+  }
+
+  spawnCombo(owner: SimEntity, c: PartyCombo, at: Vector3, members: [string, string]): void {
+    const ability: AbilityDef = {
+      slot: 'control', id: c.id, name: c.name, kind: 'ring', damage: c.damage, chiCost: 0, cooldown: 0,
+      radius: c.radius, duration: c.duration, tick: c.tick, status: c.status, vfx: c.id, anim: '', partyCombo: true,
+    };
+    const a: Area = {
+      id: this.nextId++, owner, ability, element: owner.element ?? 'fire', kind: 'ring', center: at.clone(), dir: new Vector3(0, 0, 1),
+      follow: false, remaining: c.duration, tickAcc: c.tick, power: levelPower(owner.level),
+    };
+    this.areas.push(a);
+    this.events.push({ t: 'combo', id: a.id, combo: c.id, name: c.name, pos: arr(a.center), radius: c.radius, duration: c.duration, members });
   }
 
   impulse(target: SimEntity, v: Vector3): void {
@@ -462,7 +546,7 @@ export class CombatSim {
     if (e.comboT <= 0) e.combo = 0;
     if (e.dead) return;
     const inCombat = this.time - e.lastCombat < CFG.chi.combatTimeout;
-    e.chi = Math.min(e.maxChi, e.chi + (inCombat ? CFG.chi.regenInCombat : CFG.chi.regenOutOfCombat) * dt);
+    e.chi = Math.min(e.maxChi, e.chi + (inCombat ? CFG.chi.regenInCombat : CFG.chi.regenOutOfCombat) * (1 + e.mods.regen) * dt);
     for (const [k, s] of e.statuses) {
       s.remaining -= dt;
       if (s.type === 'burn') {

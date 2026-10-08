@@ -42,11 +42,14 @@ import { Hud } from './ui/hud';
 import { DebugOverlay } from './ui/debug';
 import { ChunkMinimap } from './ui/minimap';
 import { SettingsMenu } from './ui/settingsMenu';
+import { XpHud, MasteryPanel, PartyUi } from './ui/progressUi';
+import { PROG, type Progress } from '@shared/progression';
 
 const HELP = `Click to capture mouse, Esc for settings
 WASD move, Shift sprint, Space jump, V dodge
 LMB basic, Q E R F X abilities, Tab target
 Hold right mouse: block (time it to counter)
+K mastery  I invite to party  G talk  P PvP flag
 F2 free camera  F3 overlay  F4/M chunk map`;
 
 function setLoading(text: string, frac: number) {
@@ -154,11 +157,11 @@ async function main() {
   let netStatus = account.online ? 'connecting…' : 'offline (no server)';
   let host: CombatHost;
   let start: THREE.Vector3;
-  const makeLocal = (at: THREE.Vector3) => {
-    const lc = new LocalCombat(who.name, who.element, spawn, groundAt);
+  const savedProgress: Partial<Progress> = { level: character.level, xp: character.xp ?? 0, mastery: character.mastery ?? {}, discovered: character.discovered ?? [] };
+  const makeLocal = (at: THREE.Vector3, progress: Partial<Progress> = savedProgress) => {
+    const lc = new LocalCombat(who.name, who.element, spawn, groundAt, progress);
     lc.me.faction = who.faction;
     lc.me.side = sideOf(who.faction) ?? '';
-    lc.me.level = character.level;
     lc.me.pos.copy(at);
     return lc;
   };
@@ -209,6 +212,16 @@ async function main() {
   scene.add(view.group);
   const hud = new Hud(settings);
   const remotes = new RemotePlayers(scene, view);
+  const keyOf = (action: string) => {
+    const k = settings.data.bindings[action]?.[0];
+    return k ? keyLabel(k) : action;
+  };
+  const xpHud = new XpHud(() => keyOf('mastery'));
+  const mastery = new MasteryPanel(() => host, () => updateHint());
+  const partyUi = new PartyUi(() => host);
+  const blindFog = document.createElement('div');
+  blindFog.className = 'blind-fog';
+  document.body.appendChild(blindFog);
   const zoneHud = new ZoneHud();
   const dialog = new NpcDialog();
   function togglePvp() {
@@ -294,7 +307,7 @@ async function main() {
 
   function goOffline(reason: string) {
     netStatus = `offline (${reason})`;
-    host = makeLocal(player.renderPos.clone());
+    host = makeLocal(player.renderPos.clone(), host.progress);
     abilities.setElement(settings.data.element);
     console.info(`[net] ${netStatus}`);
   }
@@ -303,7 +316,13 @@ async function main() {
 
   // Offline characters remember where they were.
   const saveLocal = () => {
-    if (!host.online && !account.online) account.saveLocalPosition(character.id, [player.renderPos.x, player.renderPos.y, player.renderPos.z], settings.data.name);
+    if (!host.online && !account.online) {
+      const p = host.progress;
+      account.saveLocalCharacter(character.id, {
+        pos: [player.renderPos.x, player.renderPos.y, player.renderPos.z], name: settings.data.name,
+        level: p.level, xp: p.xp, mastery: p.mastery, discovered: p.discovered,
+      });
+    }
   };
   setInterval(saveLocal, 10_000);
   addEventListener('beforeunload', saveLocal);
@@ -355,7 +374,7 @@ async function main() {
   crosshair.className = 'crosshair hidden';
   document.body.appendChild(crosshair);
   function updateHint() {
-    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || freeCam);
+    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || freeCam);
     crosshair.classList.toggle('hidden', !input.pointerLocked);
   }
   gr.renderer.domElement.addEventListener('click', () => {
@@ -369,7 +388,7 @@ async function main() {
   Object.assign(window, {
     __fw: {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
-      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs,
+      abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal,
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -407,7 +426,7 @@ async function main() {
       if (freeCam) fly.update(dt);
       else if (!me.dead) player.update(dt, tpc.yaw);
       syncMe();
-      if (!freeCam) abilities.update(dt, me.blocking);
+      if (!freeCam && !mastery.isOpen) abilities.update(dt, me.blocking);
       for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
       if (host instanceof NetCombat) {
         for (const c of host.corrections.splice(0)) {
@@ -416,8 +435,18 @@ async function main() {
         }
         dayNight.days = worldDays(host.serverNow);
       }
-      remotes.update(dt, host.entities, host.me.id);
-      if (host instanceof NetCombat) for (const n of host.notices.splice(0)) zoneHud.show(n.text, n.warn);
+      remotes.update(dt, host.entities, host.me.id, partyUi.memberIds());
+      for (const n of host.notices.splice(0)) zoneHud.show(n.text, n.warn);
+      // Progression and parties.
+      for (const g of host.xpLog.splice(0)) xpHud.gain(g, host.progress);
+      xpHud.update(dt, host.progress);
+      if (controls.pressed('mastery')) mastery.toggle();
+      mastery.update();
+      if (controls.pressed('partyInvite') && !partyUi.inviteLookedAt(camera)) zoneHud.show(`Look at a player within ${PROG.party.inviteRange} m to invite them`, true);
+      if (partyUi.pendingInvite && controls.pressed('acceptInvite')) partyUi.answer(true);
+      if (partyUi.pendingInvite && controls.pressed('declineInvite')) partyUi.answer(false);
+      partyUi.update(dt, { accept: keyOf('acceptInvite'), decline: keyOf('declineInvite') });
+      blindFog.classList.toggle('on', me.statuses.has('blind'));
       zoneHud.pvp = me.pvp;
       zoneHud.update(dt, player.renderPos.x, player.renderPos.z);
       const interactKey = settings.data.bindings.interact?.[0];

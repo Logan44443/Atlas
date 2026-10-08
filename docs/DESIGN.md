@@ -90,7 +90,8 @@ trainers, quest givers, patrolling guards and fighters), a color and emblem, and
   Territory wars run on a schedule (for example, twice a day).
 - **Anti-griefing**:
   - Players 10+ levels below you give 0 XP and take reduced damage from you.
-  - Repeatedly killing the same player gives diminishing XP.
+  - Repeatedly killing the same player gives diminishing XP (halved each time within 10 minutes, nothing after
+    the 4th), and killing a player within 30 s of their respawn gives none.
   - 10 seconds of spawn protection.
   - Levels 1–9 cannot be flagged.
 - **As built (Phase 6)**: the flag toggles with `P` (10 s cooldown). Hub locations and safe radii live in
@@ -131,6 +132,7 @@ Default PC layout (third-person action, keyboard + mouse):
 | Block (perfect timing = counter) | Hold right click |
 | Cycle target / interact | Tab / G |
 | Toggle PvP flag | P |
+| Mastery tree / invite to party / accept / decline | K / I / Y / N |
 
 - **Settings menu** (Esc or the gear button): players can **rebind every control** (click an action, press a key or
   mouse button; conflicts are flagged; reset to defaults), **edit their display name**, and change graphics quality
@@ -159,6 +161,13 @@ Default PC layout (third-person action, keyboard + mouse):
 - Mastery tree per element, with 3 branches. Example for Fire: Precision (crit, range), Inferno (area damage,
   burn) and Breath (chi efficiency, sustain). A respec is available for gold.
 - Special Arts need: a level threshold, a mastery quest from a master NPC (hidden in the world), and sometimes faction rank.
+- **As built (Phase 7)**: XP to next level = 100 × level^1.5. Kill XP depends on the target (patrol 90, guard 160,
+  player 150, training dummies only up to level 5) times a level-difference factor (0.25×–1.6×, nothing for targets
+  10+ levels below). First visits to each hub (120) and contested shrine (250) give discovery XP. Each tree has 5
+  skills per branch in 4 tiers (tier unlocks at 0/5/10/15 points in that branch, capstones are 1 rank); skills add
+  damage, crit chance, range, area size, status duration/strength, cooldown and chi-cost reductions, max health,
+  chi regen and armor. Respec is free until gold exists (`respecGold` in `data/progression.json`). Numbers live in
+  `data/progression.json` and `data/mastery.json`.
 
 ## 8. Special Arts (advanced bending)
 
@@ -177,6 +186,11 @@ Default PC layout (third-person action, keyboard + mouse):
 
 - **Parties** of up to 4 same-side players: shared XP within 50 m, party markers, combo moves (for example
   Water + Fire make a steam cloud that blinds).
+- **As built (Phase 7)**: invite with `I` while looking at a same-side player within 20 m; accept/decline with
+  `Y`/`N`. Kill XP is split among members within 50 m with +20% per extra member (dead members miss out). Combos
+  (`data/partyCombos.json`): Water + Fire steam (blinds: 50% miss chance), Earth + Fire magma (burn), Air + Fire
+  firestorm (burn), Water + Air blizzard (slow), Water + Earth mudslide (root), Air + Earth sandstorm (blinds). A
+  combo needs two different members' elements on one target within 2.5 s, then that target is immune for 6 s.
 - **Crews** (guilds) of up to 30 players, within one faction. They share a base, a bank and a crew rank.
 - Faction NPCs fight alongside you in territory wars, and you can hire 1 NPC companion.
 

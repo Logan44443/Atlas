@@ -1,12 +1,13 @@
 // Pure combat rules shared by client (prediction / offline play) and, from
 // Phase 5, the authoritative server. No three.js, no DOM.
+import progressionData from '../data/progression.json';
 
 export type ElementId = 'fire' | 'water' | 'earth' | 'air';
 export const ELEMENTS: ElementId[] = ['fire', 'water', 'earth', 'air'];
 export type Slot = 'basic' | 'heavy' | 'mobility' | 'defense' | 'control' | 'ultimate';
 export const SLOTS: Slot[] = ['basic', 'heavy', 'control', 'defense', 'mobility', 'ultimate'];
 export type AbilityKind = 'projectile' | 'melee' | 'dash' | 'shield' | 'ring' | 'cone';
-export type StatusType = 'burn' | 'slow' | 'root' | 'stagger';
+export type StatusType = 'burn' | 'slow' | 'root' | 'stagger' | 'blind';
 
 export interface StatusDef {
   type: StatusType;
@@ -44,6 +45,8 @@ export interface AbilityDef {
   blocksProjectiles?: boolean;
   reflects?: boolean;
   selfHeal?: number;
+  /** synthetic ability for a party combo area (never chains another combo) */
+  partyCombo?: boolean;
   status?: StatusDef;
   vfx: string;
   anim: string;
@@ -109,9 +112,9 @@ export function matchup(cfg: CombatConfig, attacker: ElementId | null, defender:
   return cfg.matchups[attacker]?.[defender] ?? 1;
 }
 
-/** Level scaling from the design: +2% bending power per level above 1. */
+/** Level scaling from the design: +2% bending power per level above 1 (data/progression.json). */
 export function levelPower(level: number): number {
-  return 1 + 0.02 * (level - 1);
+  return 1 + progressionData.powerPerLevel * (level - 1);
 }
 
 export function chiRegen(cfg: CombatConfig, inCombat: boolean): number {

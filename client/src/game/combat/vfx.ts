@@ -140,7 +140,14 @@ export const PALETTE = {
   air: { core: new THREE.Color(2, 2.2, 2.4), hot: new THREE.Color('#ffffff'), mid: new THREE.Color('#dfe9f2'), end: new THREE.Color('#9fb3c6') },
   hit: { core: new THREE.Color(3, 3, 3), hot: new THREE.Color('#ffffff'), mid: new THREE.Color('#ffe9b0'), end: new THREE.Color('#ffb060') },
 } as const;
-export type Palette = (typeof PALETTE)[keyof typeof PALETTE];
+export type Palette = { core: THREE.Color; hot: THREE.Color; mid: THREE.Color; end: THREE.Color };
+
+/** A palette from one colour (party combos). */
+export function paletteOf(hex: string, glow = false): Palette {
+  const c = new THREE.Color(hex);
+  const k = glow ? 2.2 : 1;
+  return { core: c.clone().multiplyScalar(k * 1.4), hot: c.clone().multiplyScalar(k * 1.15), mid: c.clone().multiplyScalar(k), end: c.clone().multiplyScalar(0.55) };
+}
 
 /** Element-flavoured effect helpers on top of the two particle pools. */
 export class Vfx {
@@ -235,6 +242,26 @@ export class Vfx {
         colorEnd: p.end,
         alpha: [0.6, 0],
         drag: 1,
+      });
+    }
+  }
+
+  /** Billowing cloud over a disc (party combos: steam, sand, mud, blizzard). Soft clouds use the non-glowing pool. */
+  cloud(p: Palette, center: THREE.Vector3, radius: number, count: number, soft: boolean): void {
+    const pool = soft ? this.dust : this.glow;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * Math.sqrt(Math.random());
+      pool.emit({
+        pos: new THREE.Vector3(center.x + Math.cos(a) * r, center.y + rnd(0.2, 1.6), center.z + Math.sin(a) * r),
+        vel: new THREE.Vector3(rnd(-0.6, 0.6), rnd(0.4, 1.4), rnd(-0.6, 0.6)),
+        life: rnd(0.9, 1.6),
+        size: [rnd(1.2, 2.2), rnd(2.4, 3.4)],
+        color: p.mid,
+        colorEnd: p.end,
+        alpha: soft ? [0.55, 0] : [0.8, 0],
+        drag: 0.8,
+        gravity: soft ? 0.3 : 1,
       });
     }
   }

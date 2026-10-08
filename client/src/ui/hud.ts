@@ -79,23 +79,35 @@ export class Hud {
       } else if (e.result === 'dodged') {
         text = 'Dodged';
         cls = 'info';
+      } else if (e.result === 'miss') {
+        text = 'Miss';
+        cls = 'miss';
       } else {
-        text = (e.result === 'blocked' ? 'Blocked ' : '') + e.amount;
-        cls = e.target === playerId ? 'dmg-in' : e.dot ? 'dmg-dot' : e.result === 'blocked' ? 'info' : 'dmg-out';
+        text = (e.result === 'blocked' ? 'Blocked ' : '') + e.amount + (e.crit ? '!' : '');
+        cls = e.crit ? 'crit' : e.target === playerId ? 'dmg-in' : e.dot ? 'dmg-dot' : e.result === 'blocked' ? 'info' : 'dmg-out';
       }
-    } else if (e.t === 'status' && (e.status === 'stagger' || e.status === 'root' || e.status === 'slow')) {
+    } else if (e.t === 'status' && (e.status === 'stagger' || e.status === 'root' || e.status === 'slow' || e.status === 'blind')) {
       target = entities.get(e.target);
-      text = e.status === 'stagger' ? 'Staggered' : e.status === 'root' ? 'Rooted' : 'Slowed';
+      text = { stagger: 'Staggered', root: 'Rooted', slow: 'Slowed', blind: 'Blinded' }[e.status];
       cls = 'info';
+    } else if (e.t === 'level') {
+      target = entities.get(e.target);
+      text = `Level ${e.level}!`;
+      cls = 'crit';
     }
-    if (!target) return;
-    const pos = center(target).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.9, 0));
+    let pos: THREE.Vector3;
+    if (e.t === 'combo') {
+      pos = new THREE.Vector3(e.pos[0], e.pos[1] + 2.4, e.pos[2]);
+      text = `${e.name}!`;
+      cls = 'combo';
+    } else if (target) pos = center(target).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.9, 0));
+    else return;
     if (!text) return;
     const el = document.createElement('div');
     el.className = `floater ${cls}`;
     el.textContent = text;
     document.body.appendChild(el);
-    this.floaters.push({ el, pos, t: 0, life: cls === 'counter' ? 1.3 : 0.9 });
+    this.floaters.push({ el, pos, t: 0, life: cls === 'counter' || cls === 'combo' || cls === 'crit' ? 1.4 : 0.9 });
   }
 
   update(dt: number, camera: THREE.PerspectiveCamera, me: SimEntity, abilities: PlayerAbilities, target: SimEntity | null): void {

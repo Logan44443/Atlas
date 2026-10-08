@@ -8,11 +8,13 @@ import worldData from '../data/world.json';
 import characterData from '../data/character.json';
 import { TerrainSampler } from '../shared/terrain';
 import { terrainConfig } from '../shared/factions';
-import { CombatSim, CFG, createEntity, type SimEntity, type SimEvent } from '../shared/sim/combatSim';
+import { CombatSim, CFG, createEntity, setMods, type SimEntity, type SimEvent } from '../shared/sim/combatSim';
 import { spawnDummies, updateDummy, type DummyBrain } from '../shared/sim/dummies';
 import { spawnNpcs, updateNpc, type NpcBrain } from '../shared/sim/npcs';
 import { elementContextAt, worldDays } from '../shared/clock';
-import { NET, type CastMsg, type JoinOptions, type MoveMsg, type WelcomeMsg, type CorrectMsg, type V3 } from '../shared/net';
+import { NET, type CastMsg, type JoinOptions, type MoveMsg, type WelcomeMsg, type CorrectMsg, type V3, type XpMsg, type PartyInfo, type InviteMsg } from '../shared/net';
+import { XpRules, addXp, computeMods, newProgress, sanitizeAlloc, PROG, type Progress, type XpAward } from '../shared/progression';
+import { Parties } from './parties';
 import { SLOTS, type Slot } from '../shared/combat';
 import { EntityState, WorldState } from './schema';
 import { factionById, hubSpawn, PVP } from '../shared/factions';
@@ -50,6 +52,9 @@ interface PlayerData {
   deadT: number;
   characterId: string;
   pvpToggleT: number;
+  progress: Progress;
+  /** sim time of the last respawn (no XP for spawn kills) */
+  respawnedAt: number;
 }
 
 export function cleanName(raw: unknown): string {
@@ -68,6 +73,9 @@ export class WorldRoom extends Room<WorldState> {
   private npcs: NpcBrain[] = [];
   private players = new Map<string, PlayerData>();
   private spawn = new Vector3(worldData.spawn.x, 0, worldData.spawn.z);
+  private xp = new XpRules();
+  private parties = new Parties();
+  private slowT = 0;
 
   onCreate(): void {
     const state = new WorldState();
@@ -116,6 +124,56 @@ export class WorldRoom extends Room<WorldState> {
       });
     }
     this.onMessage('ping', (c, t: number) => c.send('pong', { t, s: Date.now() }));
+
+    // Mastery: the client sends its whole allocation; the server keeps what the rules allow.
+    this.onMessage('mastery', (c, alloc: unknown) => {
+      const p = this.players.get(c.sessionId);
+      if (!p?.entity.element) return;
+      p.progress.mastery = sanitizeAlloc(p.entity.element, p.progress.level, alloc);
+      setMods(p.entity, computeMods(p.entity.element, p.progress.mastery));
+      c.send('progress', p.progress);
+    });
+    this.onMessage('respec', (c) => {
+      const p = this.players.get(c.sessionId);
+      if (!p) return;
+      p.progress.mastery = {};
+      setMods(p.entity, computeMods(p.entity.element, {}));
+      c.send('progress', p.progress);
+      c.send('notice', { text: 'Mastery points refunded' });
+    });
+
+    // Parties: same side only; invites need the target to be close.
+    this.onMessage('party:invite', (c, targetId: string) => {
+      const p = this.players.get(c.sessionId);
+      const t = this.players.get(String(targetId));
+      if (!p || !t) return c.send('notice', { text: 'No one to invite', warn: true });
+      if (t.entity.side !== p.entity.side) return c.send('notice', { text: 'Parties are for your own side', warn: true });
+      if (t.entity.pos.distanceTo(p.entity.pos) > PROG.party.inviteRange) return c.send('notice', { text: 'Get closer to invite them', warn: true });
+      const err = this.parties.invite(p.entity.id, t.entity.id, this.sim.time);
+      if (err) return c.send('notice', { text: err, warn: true });
+      const inv: InviteMsg = { from: p.entity.id, name: p.entity.name, expires: PROG.party.inviteSeconds };
+      this.clientOf(t.entity.id)?.send('invite', inv);
+      c.send('notice', { text: `Invited ${t.entity.name}` });
+    });
+    this.onMessage('party:accept', (c) => {
+      const r = this.parties.accept(c.sessionId, this.sim.time);
+      if (typeof r === 'string') return c.send('notice', { text: r, warn: true });
+      this.syncParty(r.members);
+      const me = this.players.get(c.sessionId);
+      for (const id of r.members) if (id !== c.sessionId) this.clientOf(id)?.send('notice', { text: `${me?.entity.name} joined the party` });
+    });
+    this.onMessage('party:decline', (c) => {
+      const from = this.parties.decline(c.sessionId);
+      const me = this.players.get(c.sessionId);
+      if (from) this.clientOf(from)?.send('notice', { text: `${me?.entity.name} declined`, warn: true });
+    });
+    this.onMessage('party:leave', (c) => this.leaveParty(c.sessionId, 'left'));
+    this.onMessage('party:kick', (c, targetId: string) => {
+      const party = this.parties.of(c.sessionId);
+      if (!party || party.leader !== c.sessionId || !party.members.includes(String(targetId))) return;
+      this.clientOf(String(targetId))?.send('notice', { text: 'You were removed from the party', warn: true });
+      this.leaveParty(String(targetId), 'was removed');
+    });
     this.setSimulationInterval((ms) => this.tick(Math.min(ms, 250) / 1000), 1000 / NET.tickRate);
     this.clock.setInterval(() => {
       for (const p of this.players.values()) void this.save(p);
@@ -144,34 +202,108 @@ export class WorldRoom extends Room<WorldState> {
       pos = new Vector3(sp.x, 0, sp.z);
     }
     pos.y = Math.max(groundAt(pos.x, pos.z), worldData.seaLevel);
+    const progress = newProgress({ level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])] });
+    progress.mastery = sanitizeAlloc(c.element, progress.level, c.mastery);
     const entity = createEntity({
       id: client.sessionId, name: c.name, kind: 'player', team: 'players', element: c.element, pos, level: c.level,
       faction: c.faction, side: faction?.side ?? '', ...PLAYER_SHAPE,
     });
+    setMods(entity, computeMods(c.element, progress.mastery));
+    entity.hp = entity.maxHp;
     entity.protectedUntil = this.sim.time + PVP.spawnProtectionSeconds;
     this.sim.add(entity);
     this.players.set(client.sessionId, {
       entity, last: pos.clone(), lastT: Date.now(), allowance: 0, lastDodge: -1e9, invSince: -1, swimming: false, aim: new Vector3(0, 0, 1), seq: 0, deadT: 0,
-      characterId: c.id, pvpToggleT: -1e9,
+      characterId: c.id, pvpToggleT: -1e9, progress, respawnedAt: this.sim.time,
     });
     const st = this.newState(entity);
     this.state.entities.set(entity.id, st);
     client.view = new StateView();
     client.view.add(st);
-    const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: Date.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level };
+    const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: Date.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level, progress };
     client.send('welcome', welcome);
     console.log(`[${this.roomId}] ${entity.name} (${c.faction} ${c.element}) joined (${this.clients.length}/${this.maxClients})`);
   }
 
   private save(p: PlayerData): Promise<void> {
     const e = p.entity;
-    return WorldRoom.store.saveCharacter(p.characterId, { pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)] }).catch((err) => console.error('[db] save failed', err));
+    const pr = p.progress;
+    return WorldRoom.store
+      .saveCharacter(p.characterId, { pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)], level: pr.level, xp: pr.xp, mastery: pr.mastery, discovered: pr.discovered })
+      .catch((err) => console.error('[db] save failed', err));
+  }
+
+  private clientOf(id: string): Client | undefined {
+    return this.clients.find((c) => c.sessionId === id);
+  }
+
+  // ---- progression ---------------------------------------------------------
+
+  private grant(a: XpAward): void {
+    const p = this.players.get(a.id);
+    if (!p) return;
+    const levelUp = addXp(p.progress, a.amount);
+    if (levelUp) {
+      const e = p.entity;
+      e.level = p.progress.level;
+      // Level-ups refill health and chi.
+      if (!e.dead) {
+        e.hp = e.maxHp;
+        e.chi = e.maxChi;
+      }
+      this.sim.events.push({ t: 'level', target: e.id, level: e.level });
+    }
+    const msg: XpMsg = { amount: a.amount, reason: a.reason, levelUp, progress: p.progress };
+    this.clientOf(a.id)?.send('xp', msg);
+  }
+
+  private onDeath(victimId: string, sourceId: string | null): void {
+    const victim = this.sim.entities.get(victimId);
+    const killer = sourceId ? this.players.get(sourceId) : undefined;
+    if (!victim || !killer || victim === killer.entity) return;
+    for (const a of this.xp.onKill(victim, killer, this.players, this.parties.membersOf(killer.entity.id), this.sim.time)) this.grant(a);
+  }
+
+  // ---- parties -------------------------------------------------------------
+
+  private partyInfo(id: string): PartyInfo | null {
+    const party = this.parties.of(id);
+    if (!party) return null;
+    return {
+      id: party.id,
+      leader: party.leader,
+      members: party.members.flatMap((m) => {
+        const e = this.players.get(m)?.entity;
+        return e ? [{ id: e.id, name: e.name, element: e.element ?? '', level: e.level, hp: Math.ceil(e.hp), maxHp: e.maxHp, x: Math.round(e.pos.x), z: Math.round(e.pos.z), dead: e.dead }] : [];
+      }),
+    };
+  }
+
+  /** Push party membership into the sim (combos) and to each member's client. */
+  private syncParty(ids: string[]): void {
+    for (const id of ids) {
+      const p = this.players.get(id);
+      if (!p) continue;
+      p.entity.party = this.parties.of(id)?.id ?? '';
+      this.clientOf(id)?.send('party', this.partyInfo(id));
+    }
+  }
+
+  private leaveParty(id: string, verb: string): void {
+    const before = this.parties.membersOf(id);
+    if (before.length < 2) return;
+    this.parties.leave(id);
+    this.syncParty(before);
+    const name = this.players.get(id)?.entity.name ?? 'Someone';
+    for (const m of before) if (m !== id) this.clientOf(m)?.send('notice', { text: `${name} ${verb} the party` });
   }
 
   async onLeave(client: Client): Promise<void> {
     const p = this.players.get(client.sessionId);
     if (p) {
       online.delete(p.characterId);
+      this.leaveParty(client.sessionId, 'left');
+      this.parties.decline(client.sessionId);
       await this.save(p);
     }
     this.players.delete(client.sessionId);
@@ -265,6 +397,7 @@ export class WorldRoom extends Room<WorldState> {
           p.last.copy(e.pos);
           this.sim.revive(e);
           e.protectedUntil = this.sim.time + PVP.spawnProtectionSeconds;
+          p.respawnedAt = this.sim.time;
           events.push(...this.sim.drain());
         }
       }
@@ -273,8 +406,20 @@ export class WorldRoom extends Room<WorldState> {
       if (ev.t === 'dash') {
         const p = this.players.get(ev.owner);
         if (p) p.allowance += ev.distance + ev.lift;
+      } else if (ev.t === 'death') this.onDeath(ev.target, ev.source);
+    }
+    // Once a second: landmark discovery and party frames.
+    this.slowT += dt;
+    if (this.slowT >= 1) {
+      this.slowT = 0;
+      for (const p of this.players.values()) {
+        const a = this.xp.discover(p);
+        if (a) this.grant(a);
+        if (this.parties.of(p.entity.id)) this.clientOf(p.entity.id)?.send('party', this.partyInfo(p.entity.id));
       }
     }
+    // Level-up events raised by grant() above.
+    events.push(...this.sim.drain());
 
     for (const e of this.sim.entities.values()) {
       const st = this.state.entities.get(e.id);
@@ -344,6 +489,10 @@ export class WorldRoom extends Room<WorldState> {
         return nearId(ev.target);
       case 'dash':
         return nearId(ev.owner);
+      case 'combo':
+        return near(ev.pos[0], ev.pos[2]);
+      case 'level':
+        return nearId(ev.target);
     }
   }
 

@@ -10,10 +10,12 @@ import worldData from '@data/world.json';
 // Same reach as the server's interest management, so offline (where every NPC is local) draws what online would.
 const DRAW_DISTANCE = netData.interestAddChunks * worldData.chunkSize;
 
-/** Nameplate text + colour: NPCs show their title in faction colours, PvP-flagged players glow red. */
-function plateFor(e: SimEntity): { text: string; color: string } {
+/** Nameplate text + colour: NPCs show their title in faction colours, party members are green, PvP-flagged players red. */
+function plateFor(e: SimEntity, inParty: boolean): { text: string; color: string } {
   if (e.kind === 'npc') return { text: `${e.name} · ${e.title ?? ''}`, color: factionById(e.faction)?.color ?? '#ffe6a0' };
-  return { text: e.name, color: e.pvp ? '#ff9a7a' : '#ffffff' };
+  const lv = `Lv ${e.level} ${e.name}`;
+  if (inParty) return { text: lv, color: '#8dff9a' };
+  return { text: lv, color: e.pvp ? '#ff9a7a' : '#ffffff' };
 }
 
 interface RemoteView {
@@ -36,7 +38,7 @@ export class RemotePlayers {
     return this.views.size;
   }
 
-  update(dt: number, entities: Map<string, SimEntity>, myId: string): void {
+  update(dt: number, entities: Map<string, SimEntity>, myId: string, party: Set<string> = new Set()): void {
     const me = entities.get(myId);
     for (const e of entities.values()) {
       if ((e.kind !== 'player' && e.kind !== 'npc') || e.id === myId) continue;
@@ -55,7 +57,7 @@ export class RemotePlayers {
       }
       if (!v) {
         const avatar = new Avatar(el as Element);
-        const pl = plateFor(e);
+        const pl = plateFor(e, party.has(e.id));
         const plate = new Nameplate(pl.text, pl.color);
         avatar.root.add(plate.sprite);
         avatar.root.position.copy(e.pos);
@@ -64,7 +66,7 @@ export class RemotePlayers {
         v = { avatar, plate, element: el, plateKey: pl.text + pl.color, last: e.pos.clone(), speed: 0, vy: 0 };
         this.views.set(e.id, v);
       }
-      const pl = plateFor(e);
+      const pl = plateFor(e, party.has(e.id));
       if (v.plateKey !== pl.text + pl.color) {
         v.plateKey = pl.text + pl.color;
         v.plate.set(pl.text, pl.color);

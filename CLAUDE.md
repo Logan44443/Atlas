@@ -19,7 +19,11 @@ This file covers architecture, layout, conventions and the current phase. Update
   element + faction, PostgreSQL persistence with in-memory fallback, saved position on rejoin, 6 faction hubs with
   walls/stalls/centrepieces, 7 NPC members per hub, safe/wild/contested zones, PvP flag on `P` with level gate,
   spawn protection and low-level damage scaling). Verified with `scripts/phase6-test.mjs`.
-- **Phase 7 Progression**: next.
+- **Phase 7 Progression**: done (XP from NPC/dummy/PvP kills and landmark discovery, levels 1-50 with +2% power
+  each, 3-branch mastery tree per element (1 point per level, tiered unlocks, free respec until gold exists),
+  crits/armor/chi-regen modifiers, parties of 4 with shared XP within 50 m, anti-griefing XP rules, 6 party combos
+  such as Water + Fire steam that blinds). Verified with `scripts/progression-check.ts` and `scripts/phase7-test.mjs`.
+- **Phase 8 Special Arts**: next.
 - README.md is owned by a separate thread: don't edit it from build threads.
 
 ## Run it
@@ -37,13 +41,16 @@ SCENARIO=character npm run smoke   # movement + settings menu (rename, rebind)
 SCENARIO=combat node scripts/smoke.mjs "http://localhost:5173/?offline"   # 4 elements vs dummies + perfect block (offline sim)
 node scripts/net-test.mjs          # two browsers on one shard: see each other, hits, PvP, speed-hack correction
 node scripts/phase6-test.mjs       # title screen, hub spawn, NPC talk, safe vs contested PvP, patrols, saved position
+npx tsx scripts/progression-check.ts   # XP/mastery/combo rules without a browser
+node scripts/phase7-test.mjs       # party invite, steam combo, shared XP, discovery level-up, mastery panel, saves
 ```
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
 `?offline` (don't look for a server), `?server=ws://host:port`, `?shard=<roomId>`,
 `?char=Name&el=fire&fac=sentinel` (skip the title screen: pick or create that character; tests use it and
 `smoke.mjs` adds it by default).
-In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag.
+In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag, `K` mastery tree,
+`I` invite the player in front of you, `Y`/`N` answer an invite.
 
 ## Stack (fixed by design)
 
@@ -64,7 +71,8 @@ client/              Vite root (index.html, src/, public/)
   src/world/hubs.ts  faction hub + shrine buildings (merged geometry, instanced lanterns, box colliders)
   src/net/           NetCombat: Colyseus client, entity mirror + interpolation, move/cast messages
   src/net/account.ts AccountClient: guest/register/login, character list (offline: localStorage roster)
-  src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog, CSS
+  src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog,
+                     progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), CSS
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -78,10 +86,12 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   sim/npcs.ts        faction NPC members (vendors, trainers, envoys, guards, patrols)
   factions.ts        factions, sides, zones (zoneAt), PvP numbers, hub flats -> terrainConfig(), hubSpawn
   names.ts           name/username/password validation shared by client and server
+  progression.ts     XP curve, kill/discovery rewards (XpRules), mastery validation, Mods + modKit()
   clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
   net.ts             wire protocol types (move/cast/welcome/correct/events)
 server/              Node shard server: index.ts (HTTP /health, /shards, /api + Colyseus), worldRoom.ts, schema.ts
   api.ts             account/character REST endpoints (rate-limited)
+  parties.ts         party/invite bookkeeping per shard
   db/                Store interface: PgStore (migrations db/*.sql) and MemoryStore
 data/                ALL tunable numbers (JSON). Edit these, not code.
   quality.json       Low/Medium/High presets (pixel ratio, shadows, grass, rings, LOD)
@@ -96,6 +106,9 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   factions.json      factions, hub positions/styles/safe radius, NPC roster/levels/names
   zones.json         contested shrines and PvP rules (flag level, spawn protection, low-level scaling)
   accounts.json      character slots, session length, guest rate limit, save interval
+  progression.json   XP curve, kill/discovery XP, level factor, PvP repeat rules, party size/share radius
+  mastery.json       mastery trees (3 branches x 5 skills per element) and tier unlocks
+  partyCombos.json   party combo pairs (steam, magma, firestorm, blizzard, mud, sandstorm)
 scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
 docs/DESIGN.md       game design (keep in sync)
 ```
@@ -139,6 +152,13 @@ docs/DESIGN.md       game design (keep in sync)
 - **Factions/zones**: `zoneAt(x,z)` is the single source for safe/wild/contested. `canHarm(a,b,time)` in the sim
   applies all damage rules (same side, safe zone, spawn protection, contested vs flagged wilds). Hub and shrine
   sites are levelled through `TerrainConfig.flats`, so every sampler must be built from `terrainConfig()`.
+- **Progression**: the authority (WorldRoom online, LocalCombat offline) owns a `Progress` per player and runs
+  `XpRules` on `death` events and a 1 s landmark check; clients only display `xp`/`progress` messages. Mastery is
+  sent as a whole allocation and always passed through `sanitizeAlloc`. `setMods(entity, computeMods(...))` turns
+  it into `entity.mods`; the sim reads abilities through `kitOf(entity)` (memoised `modKit`), so client cooldown
+  prediction uses the same numbers. Offline characters save progress to localStorage.
+- **Parties/combos**: `entity.party` is set by the room. `CombatSim.comboCheck` marks each party hit on a target;
+  a different element from another member within the window spawns the pair's combo area (`combo` event).
 - **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
   are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
 

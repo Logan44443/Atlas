@@ -1,0 +1,44 @@
+{
+  "_comment": "XP and levels (DESIGN section 7), parties (section 9) and anti-griefing XP rules (section 5). xpToNext(level) = round(base * level^exponent).",
+  "maxLevel": 50,
+  "xpCurve": { "base": 100, "exponent": 1.5 },
+  "powerPerLevel": 0.02,
+  "pointsPerLevel": 1,
+  "kill": {
+    "_comment": "Base XP for a kill, before the level-difference factor. Dummies only teach up to dummyMaxLevel.",
+    "npc": { "fighter": 90, "guard": 160, "vendor": 40, "trainer": 60, "quest": 40 },
+    "dummy": { "dummy_a": 12, "dummy_b": 12, "dummy_c": 30 },
+    "dummyMaxLevel": 5,
+    "player": 150
+  },
+  "levelDiff": {
+    "_comment": "XP x clamp(1 + perLevel * (victimLevel - killerLevel), min, max); 0 when the victim is greyGap+ levels below.",
+    "perLevel": 0.08,
+    "min": 0.25,
+    "max": 1.6,
+    "greyGap": 10
+  },
+  "pvp": {
+    "_comment": "Repeat kills of the same player within repeatWindowSeconds give repeatFactor^n XP, nothing after maxRepeats. Kills within spawnKillSeconds of the victim's respawn give nothing.",
+    "repeatWindowSeconds": 600,
+    "repeatFactor": 0.5,
+    "maxRepeats": 3,
+    "spawnKillSeconds": 30
+  },
+  "party": {
+    "_comment": "Same-side parties. Kill XP is split between members within shareRadius of the kill, plus bonusPerMember for each extra member.",
+    "maxSize": 4,
+    "shareRadius": 50,
+    "bonusPerMember": 0.2,
+    "inviteSeconds": 30,
+    "inviteRange": 20
+  },
+  "discovery": {
+    "_comment": "First visit to a landmark (any faction hub or contested shrine).",
+    "radius": 60,
+    "hub": 120,
+    "shrine": 250
+  },
+  "respecGold": 0,
+  "crit": { "multiplier": 1.6 }
+}

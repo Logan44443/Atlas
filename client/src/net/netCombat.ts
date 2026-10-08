@@ -1,9 +1,10 @@
 import * as THREE from 'three/webgpu';
 import { Client, type Room } from 'colyseus.js';
 import type { ElementId, Slot, StatusType } from '@shared/combat';
-import { createEntity, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
-import { NET, ROOM_NAME, type CorrectMsg, type JoinOptions, type MoveMsg, type V3, type WelcomeMsg } from '@shared/net';
-import { createPlayerEntity, PLAYER_SHAPE, type CombatHost } from '../game/combat/host';
+import { createEntity, setMods, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
+import { NET, ROOM_NAME, type CorrectMsg, type InviteMsg, type JoinOptions, type MoveMsg, type PartyInfo, type V3, type WelcomeMsg, type XpMsg } from '@shared/net';
+import { computeMods, newProgress, type Progress } from '@shared/progression';
+import { createPlayerEntity, PLAYER_SHAPE, type CombatHost, type XpGain } from '../game/combat/host';
 import { sideOf } from '@shared/factions';
 
 /** What the client reads from a replicated entity (see server/schema.ts). */
@@ -91,6 +92,10 @@ export class NetCombat implements CombatHost {
   corrections: CorrectMsg[] = [];
   notices: Array<{ text: string; warn?: boolean }> = [];
   onClose: (() => void) | null = null;
+  progress: Progress = newProgress();
+  readonly xpLog: XpGain[] = [];
+  party: PartyInfo | null = null;
+  readonly invites: InviteMsg[] = [];
 
   private constructor(
     readonly room: Room<WorldStateView>,
@@ -109,6 +114,16 @@ export class NetCombat implements CombatHost {
     room.onMessage('imp', (v: V3) => this.me.pendingImpulse.add(new THREE.Vector3(v[0], v[1], v[2])));
     room.onMessage('correct', (m: CorrectMsg) => this.corrections.push(m));
     room.onMessage('notice', (m: { text: string; warn?: boolean }) => this.notices.push(m));
+    room.onMessage('xp', (m: XpMsg) => {
+      this.applyProgress(m.progress);
+      this.xpLog.push({ amount: m.amount, reason: m.reason, levelUp: m.levelUp });
+    });
+    room.onMessage('progress', (p: Progress) => this.applyProgress(p));
+    room.onMessage('party', (p: PartyInfo | null) => {
+      this.party = p;
+      this.me.party = p?.id ?? '';
+    });
+    room.onMessage('invite', (m: InviteMsg) => this.invites.push(m));
     room.onMessage('pong', (m: { t: number; s: number }) => {
       const now = Date.now();
       this.rtt = now - m.t;
@@ -141,6 +156,7 @@ export class NetCombat implements CombatHost {
     net.me.faction = who.faction;
     net.me.side = sideOf(who.faction) ?? '';
     net.me.level = welcome.level;
+    net.applyProgress(welcome.progress);
     return net;
   }
 
@@ -168,6 +184,32 @@ export class NetCombat implements CombatHost {
 
   setPvp(on: boolean): void {
     if (!this.closed) this.room.send('pvp', on);
+  }
+
+  /** The server's word on level/XP/mastery. Mods are mirrored so predicted cooldowns match. */
+  private applyProgress(p: Progress): void {
+    this.progress = p;
+    this.me.level = p.level;
+    setMods(this.me, computeMods(this.me.element, p.mastery));
+  }
+
+  setMastery(alloc: Record<string, number>): void {
+    if (!this.closed) this.room.send('mastery', alloc);
+  }
+  respec(): void {
+    if (!this.closed) this.room.send('respec');
+  }
+  invite(entityId: string): void {
+    if (!this.closed) this.room.send('party:invite', entityId);
+  }
+  answerInvite(accept: boolean): void {
+    if (!this.closed) this.room.send(accept ? 'party:accept' : 'party:decline');
+  }
+  leaveParty(): void {
+    if (!this.closed) this.room.send('party:leave');
+  }
+  kick(entityId: string): void {
+    if (!this.closed) this.room.send('party:kick', entityId);
   }
 
   private onState(s: WorldStateView): void {

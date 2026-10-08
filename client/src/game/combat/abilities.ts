@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { canBend, type AbilityDef, type ElementContext, type ElementId, type ElementKit, type Slot } from '@shared/combat';
-import { CFG, KITS, center, canHarm, type SimEntity } from '@shared/sim/combatSim';
+import { CFG, KITS, center, canHarm, kitOf, type SimEntity } from '@shared/sim/combatSim';
 import type { Controls } from '../../engine/settings';
 import type { Player } from '../player';
 import { gestureFor, type GestureStyle } from './combatView';
@@ -25,7 +25,6 @@ export type CastSink = (slot: Slot, dir: THREE.Vector3) => void;
  */
 export class PlayerAbilities {
   element: ElementId;
-  kit!: ElementKit;
   private cooldowns = new Map<Slot, number>();
   private gestureT = 0;
   private gestureDur = 0.3;
@@ -55,8 +54,12 @@ export class PlayerAbilities {
     me.element = el;
     // Offline the sim keeps its own cooldowns on the same entity; online the server clears them.
     me.cooldowns.clear();
-    this.kit = KITS[el];
     this.cooldowns.clear();
+  }
+
+  /** Abilities with the player's mastery applied (same numbers the authority uses). */
+  get kit(): ElementKit {
+    return kitOf(this.me());
   }
 
   slots(): Record<Slot, SlotState> {

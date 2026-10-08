@@ -24,7 +24,20 @@ export interface CharacterRow {
   rank: number;
   /** last saved position, null until the character has played */
   pos: [number, number, number] | null;
+  /** mastery node id -> rank */
+  mastery: Record<string, number>;
+  /** landmark ids already discovered */
+  discovered: string[];
   createdAt: string;
+}
+
+export interface CharacterSave {
+  pos?: [number, number, number];
+  level?: number;
+  xp?: number;
+  rank?: number;
+  mastery?: Record<string, number>;
+  discovered?: string[];
 }
 
 export class StoreError extends Error {
@@ -47,7 +60,7 @@ export interface Store {
   deleteCharacter(accountId: string, id: string): Promise<boolean>;
   getCharacter(id: string): Promise<CharacterRow | null>;
   renameCharacter(id: string, name: string): Promise<void>;
-  saveCharacter(id: string, s: { pos?: [number, number, number]; level?: number; xp?: number; rank?: number }): Promise<void>;
+  saveCharacter(id: string, s: CharacterSave): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -66,6 +79,8 @@ const toChar = (r: Row): CharacterRow => ({
   xp: r.xp as number,
   rank: r.faction_rank as number,
   pos: r.x === null ? null : [r.x as number, r.y as number, r.z as number],
+  mastery: (r.mastery as Record<string, number>) ?? {},
+  discovered: (r.discovered as string[]) ?? [],
   createdAt: new Date(r.created_at as string).toISOString(),
 });
 const toAccount = (r: Row): Account => ({ id: r.id as string, username: r.username as string, guest: r.guest as boolean });
@@ -189,14 +204,18 @@ export class PgStore implements Store {
     }
   }
 
-  async saveCharacter(id: string, s: { pos?: [number, number, number]; level?: number; xp?: number; rank?: number }): Promise<void> {
+  async saveCharacter(id: string, s: CharacterSave): Promise<void> {
     await this.pool.query(
       `UPDATE characters SET
          x = COALESCE($2, x), y = COALESCE($3, y), z = COALESCE($4, z),
          level = COALESCE($5, level), xp = COALESCE($6, xp), faction_rank = COALESCE($7, faction_rank),
+         mastery = COALESCE($8::jsonb, mastery), discovered = COALESCE($9::jsonb, discovered),
          last_seen = now()
        WHERE id = $1`,
-      [id, s.pos?.[0] ?? null, s.pos?.[1] ?? null, s.pos?.[2] ?? null, s.level ?? null, s.xp ?? null, s.rank ?? null],
+      [
+        id, s.pos?.[0] ?? null, s.pos?.[1] ?? null, s.pos?.[2] ?? null, s.level ?? null, s.xp ?? null, s.rank ?? null,
+        s.mastery ? JSON.stringify(s.mastery) : null, s.discovered ? JSON.stringify(s.discovered) : null,
+      ],
     );
   }
 
@@ -255,7 +274,7 @@ export class MemoryStore implements Store {
   async createCharacter(accountId: string, c: { name: string; element: ElementId; faction: FactionId }, maxSlots: number): Promise<CharacterRow> {
     if ((await this.listCharacters(accountId)).length >= maxSlots) throw new StoreError('slots_full', `All ${maxSlots} character slots are used`);
     for (const o of this.chars.values()) if (o.name.toLowerCase() === c.name.toLowerCase()) throw new StoreError('name_taken', 'That name is taken');
-    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, createdAt: new Date().toISOString() };
+    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], createdAt: new Date().toISOString() };
     this.chars.set(row.id, row);
     return row;
   }
@@ -272,10 +291,12 @@ export class MemoryStore implements Store {
     const c = this.chars.get(id);
     if (c) c.name = name;
   }
-  async saveCharacter(id: string, s: { pos?: [number, number, number]; level?: number; xp?: number; rank?: number }): Promise<void> {
+  async saveCharacter(id: string, s: CharacterSave): Promise<void> {
     const c = this.chars.get(id);
     if (!c) return;
     if (s.pos) c.pos = s.pos;
+    if (s.mastery) c.mastery = { ...s.mastery };
+    if (s.discovered) c.discovered = [...s.discovered];
     if (s.level !== undefined) c.level = s.level;
     if (s.xp !== undefined) c.xp = s.xp;
     if (s.rank !== undefined) c.rank = s.rank;
