@@ -128,6 +128,15 @@ export class Hud {
       const st = slots[s];
       const keys = this.settings.data.bindings[SLOT_ACTION[s]] ?? [];
       ui.key.textContent = keys[0] ? keyLabel(keys[0]).replace(' click', '') : '—';
+      // The Art slot stays empty until a Special Art is learned and equipped.
+      ui.el.classList.toggle('empty', !st);
+      if (!st) {
+        ui.name.textContent = '';
+        ui.cd.style.background = 'none';
+        ui.cdText.textContent = '';
+        ui.el.title = 'Special Art: learn one from a master (J)';
+        continue;
+      }
       ui.name.textContent = st.def.name;
       const frac = st.def.cooldown > 0 ? st.cooldown / st.def.cooldown : 0;
       ui.cd.style.background = frac > 0 ? `conic-gradient(rgba(0,0,0,0.65) ${frac * 360}deg, transparent 0)` : 'none';

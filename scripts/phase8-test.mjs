@@ -181,7 +181,9 @@ ok(hh.hp > 100 && !hh.burn, `Healing: 60 -> ${hh.hp} hp, burn cleansed: ${!hh.bu
 
 // Earth: Metal cable drags a dummy; lava pool burns and cools into a wall.
 const e = await open('E', `offline&char=Toph${run}&el=earth&fac=sentinel`);
-await goTo(e, 0, -14);
+// Stand 8 m from the dummy so the cable has a clear line (no terrain in between).
+const da = await e.page.evaluate(() => window.__fw.host.entities.get('dummy_a').pos.clone());
+await goTo(e, da.x, da.z - 8);
 await grantOffline(e, 35, ['metal', 'lava'], 'metal');
 await castArt(e, 'dummy_a');
 await until(e, () => window.__fw.__ev.some((x) => x.t === 'hit' && x.target === 'dummy_a'), null, 30000).catch(() => {});

@@ -437,7 +437,7 @@ async function main() {
   // "Click to play" hint + crosshair.
   const hint = document.createElement('div');
   hint.className = 'play-hint';
-  hint.textContent = 'Click to play · Esc for settings';
+  hint.textContent = 'Click to play · Esc for settings · F3 for help';
   document.body.appendChild(hint);
   const crosshair = document.createElement('div');
   crosshair.className = 'crosshair hidden';
@@ -476,7 +476,15 @@ async function main() {
   let loadingFrames = 0;
   streamer.applyBudget = 24;
 
+  // Input is cleared in `finally` so a frame that throws can't leave a key "pressed" forever (repeat casts).
   gr.renderer.setAnimationLoop(() => {
+    try {
+      frame();
+    } finally {
+      input.endFrame();
+    }
+  });
+  function frame() {
     clock.update();
     const rawDt = clock.getDelta();
     const dt = Math.min(rawDt, 0.1);
@@ -561,7 +569,6 @@ async function main() {
     // Behind the loading screen only render occasionally (keeps shaders warm)
     // so the main thread spends its time streaming in the spawn area.
     if (!loading || ++loadingFrames % 20 === 0) gr.render();
-    input.endFrame();
 
     if (loading) {
       const c = streamer.counts;
@@ -629,7 +636,7 @@ async function main() {
         h,
       );
     }
-  });
+  }
 }
 
 main().catch((err) => {

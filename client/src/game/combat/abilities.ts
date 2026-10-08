@@ -62,8 +62,8 @@ export class PlayerAbilities {
     return kitOf(this.me());
   }
 
-  slots(): Record<Slot, SlotState> {
-    const out = {} as Record<Slot, SlotState>;
+  slots(): Partial<Record<Slot, SlotState>> {
+    const out = {} as Partial<Record<Slot, SlotState>>;
     const me = this.me();
     for (const d of this.kit.abilities) {
       const cd = this.cooldowns.get(d.slot) ?? 0;

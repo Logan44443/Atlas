@@ -1,0 +1,8 @@
+{
+  "name": "nanoid-compat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "nanoid v2 default-export API on node:crypto. Replaces the vulnerable nanoid@2 that @colyseus/core 0.16 depends on (see package.json overrides).",
+  "main": "index.js",
+  "license": "MIT"
+}
