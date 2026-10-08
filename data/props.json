@@ -1,0 +1,9 @@
+{
+  "_comment": "Static prop scatter rules used by scripts/build-world.ts. Heights in metres, minSlopeY = normal.y (1 = flat). Changing this file regenerates the world on next dev/build.",
+  "rules": [
+    { "type": "pine",      "perChunk": 70, "minHeight": 8,  "maxHeight": 70, "minSlopeY": 0.8,  "scale": [0.8, 1.5], "clusterScale": 140, "clusterThreshold": 0.05 },
+    { "type": "broadleaf", "perChunk": 45, "minHeight": 3,  "maxHeight": 40, "minSlopeY": 0.85, "scale": [0.8, 1.4], "clusterScale": 110, "clusterThreshold": 0.15 },
+    { "type": "bush",      "perChunk": 40, "minHeight": 2.5, "maxHeight": 45, "minSlopeY": 0.8, "scale": [0.6, 1.3], "clusterScale": 60,  "clusterThreshold": -0.2 },
+    { "type": "rock",      "perChunk": 18, "minHeight": 1,  "maxHeight": 140, "minSlopeY": 0.5, "scale": [0.5, 2.2], "clusterScale": 80,  "clusterThreshold": 0.0 }
+  ]
+}

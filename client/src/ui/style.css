@@ -1,0 +1,33 @@
+:root {
+  --ink: #f4efe2;
+  --panel: rgba(18, 22, 34, 0.72);
+  --accent: #ffb45a;
+  --muted: #a9b0c2;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f1c; color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+#app, #app canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#loading {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 40%, #2a3a6e, #0b0f1c 70%); z-index: 50; transition: opacity 0.6s;
+}
+#loading.done { opacity: 0; pointer-events: none; }
+.loading-title { font-size: 44px; letter-spacing: 0.2em; font-weight: 700; text-transform: uppercase; }
+.loading-sub { margin-top: 8px; color: var(--muted); font-size: 14px; }
+.loading-bar { margin-top: 20px; width: 240px; height: 4px; background: rgba(255,255,255,0.12); border-radius: 2px; overflow: hidden; }
+#loading-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s; }
+
+.debug {
+  position: fixed; top: 10px; left: 10px; z-index: 20; min-width: 230px; padding: 10px 12px; border-radius: 8px;
+  background: var(--panel); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; backdrop-filter: blur(4px);
+  user-select: none;
+}
+.debug.hidden { display: none; }
+.debug .row { display: flex; justify-content: space-between; gap: 12px; }
+.debug .k { color: var(--muted); }
+.debug .fps-good { color: #8ef08e; } .debug .fps-ok { color: #f0d88e; } .debug .fps-bad { color: #f08e8e; }
+.debug hr { border: 0; border-top: 1px solid rgba(255,255,255,0.12); margin: 6px 0; }
+.debug select, .debug input[type=range] { width: 120px; }
+.debug select { background: #1d2333; color: var(--ink); border: 1px solid #3a4258; border-radius: 4px; font: inherit; }
+.debug .help { color: var(--muted); margin-top: 6px; font-size: 11px; white-space: pre-line; }
+.debug canvas.minimap { display: block; margin-top: 6px; border-radius: 4px; image-rendering: pixelated; background: #000; }

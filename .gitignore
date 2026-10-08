@@ -1,0 +1,7 @@
+node_modules/
+dist/
+client/public/world/
+*.log
+.DS_Store
+test-results/
+screenshots/
