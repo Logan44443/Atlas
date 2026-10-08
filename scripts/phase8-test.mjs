@@ -235,14 +235,16 @@ const glide = await a.page.evaluate(() => ({ g: window.__fw.player.gliding, vy: 
 ok(glide.g && glide.vy > -3.5, `recast ends flight; jump in the air opens the glider (fall ${glide.vy.toFixed(1)} m/s)`);
 await until(a, () => window.__fw.player.grounded, null, 60000).catch(() => {});
 await a.page.evaluate(() => window.__fw.host.equipArt('spirit'));
-await waitSim(a, 0.5);
-const body = await a.page.evaluate(() => window.__fw.player.renderPos.clone());
+// Let the landing settle so the body is really standing still.
+await waitSim(a, 2);
 await castArt(a, null);
 await until(a, () => window.__fw.spirit.t > 0, null, 20000).catch(() => {});
+const body = await a.page.evaluate(() => window.__fw.player.renderPos.clone());
+const cam0 = await a.page.evaluate(() => window.__fw.camera.position.clone());
 await a.page.keyboard.down('KeyW');
 await waitSim(a, 1.5);
 await a.page.keyboard.up('KeyW');
-const sp = await a.page.evaluate((b) => ({ t: window.__fw.spirit.t, frozen: window.__fw.player.frozen, moved: window.__fw.player.renderPos.distanceTo(b), cam: window.__fw.camera.position.distanceTo(b) }), body);
+const sp = await a.page.evaluate(([b, c]) => ({ t: window.__fw.spirit.t, frozen: window.__fw.player.frozen, moved: window.__fw.player.renderPos.distanceTo(b), cam: window.__fw.camera.position.distanceTo(c) }), [body, cam0]);
 ok(sp.t > 0 && sp.frozen && sp.moved < 0.5 && sp.cam > 5, `Spirit projection: body stays (${sp.moved.toFixed(2)} m), spirit camera roams (${sp.cam.toFixed(1)} m away)`);
 await a.page.screenshot({ path: `${outDir}/p8-spirit.png` });
 await castArt(a, null);
