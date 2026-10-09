@@ -10,10 +10,13 @@ import worldData from '@data/world.json';
 // Same reach as the server's interest management, so offline (where every NPC is local) draws what online would.
 const DRAW_DISTANCE = netData.interestAddChunks * worldData.chunkSize;
 
-/** Nameplate text + colour: NPCs show their title in faction colours, party members are green, PvP-flagged players red. */
+/**
+ * Nameplate text + colour: NPCs show their title in faction colours, party members are green, PvP-flagged players red.
+ * Players show their crew tag, and a skull while an Outlaw bounty is on their head.
+ */
 function plateFor(e: SimEntity, inParty: boolean): { text: string; color: string } {
   if (e.kind === 'npc') return { text: `${e.name} · ${e.title ?? ''}`, color: e.role === 'master' ? '#ffb35a' : factionById(e.faction)?.color ?? '#ffe6a0' };
-  const lv = `Lv ${e.level} ${e.name}`;
+  const lv = `${e.tag ? `[${e.tag}] ` : ''}Lv ${e.level} ${e.name}${e.infamy > 0 ? ' ☠' : ''}`;
   if (inParty) return { text: lv, color: '#8dff9a' };
   return { text: lv, color: e.pvp ? '#ff9a7a' : '#ffffff' };
 }

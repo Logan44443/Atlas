@@ -28,6 +28,8 @@
     { "id": "channel",      "label": "Channel (bend-craft)", "group": "Bending", "keys": ["KeyC"] },
     { "id": "pets",         "label": "Pets panel",         "group": "Interface", "keys": ["KeyO"] },
     { "id": "mount",        "label": "Ride / dismount pet", "group": "Movement", "keys": ["KeyH"] },
+    { "id": "worldMap",     "label": "World map",          "group": "Interface", "keys": ["KeyM"] },
+    { "id": "faction",      "label": "Faction & crew",     "group": "Interface", "keys": ["KeyU"] },
     { "id": "freeCamera",   "label": "Debug free camera",  "group": "Interface", "keys": ["F2"] }
   ],
   "reserved": ["Escape", "F3", "F4", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"],

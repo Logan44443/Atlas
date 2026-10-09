@@ -1,0 +1,26 @@
+/* Chat (Phase 11): bottom-left, clear of the hotbar and XP bar in the middle and the party frame on the right.
+   Lines fade after ~15 s; while typing the whole log shows and scrolls. Below the full-screen panels (z 40). */
+.chat {
+  position: fixed; left: 14px; bottom: 14px; z-index: 35; width: clamp(220px, calc(50vw - 290px), 420px);
+  display: flex; flex-direction: column; gap: 4px; pointer-events: none; font-size: 13px; line-height: 1.35;
+}
+.chat.typing { pointer-events: auto; }
+.c-log { max-height: 180px; overflow: hidden; padding: 4px 6px; border-radius: 8px; overscroll-behavior: contain; }
+.chat.typing .c-log { max-height: min(300px, 38vh); overflow-y: auto; background: rgba(10, 14, 24, 0.72); }
+.c-line { padding: 1px 0; text-shadow: 0 1px 2px #000, 0 0 2px #000; overflow-wrap: anywhere; }
+.c-line.old { display: none; }
+.chat.typing .c-line { opacity: 1 !important; }
+.chat.typing .c-line.old { display: block; }
+.c-line b { font-weight: 600; }
+.c-line .c-pre { opacity: 0.8; }
+.c-line .c-tag { color: #d9c08a; }
+.c-line.c-system { color: var(--muted); font-style: italic; }
+.c-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px;
+  background: rgba(10, 14, 24, 0.85); border: 1px solid #2c344a; opacity: 0; transition: opacity 0.12s;
+}
+.chat.typing .c-row { opacity: 1; border-color: #3a4560; }
+.c-chan { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.c-in { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--ink); font: inherit; padding: 3px 0; }
+.c-in::placeholder { color: #6b7388; }
+@media (max-width: 1100px) { .chat { bottom: 170px; width: clamp(180px, calc(50vw - 250px), 320px); } }

@@ -315,7 +315,7 @@ export class Camps {
     return [...this.all.values()].filter((s) => pieceById(s.piece)?.effect === 'hall');
   }
   /** Workshops raise a camp's or base's piece limit. */
-  private workshopBonus(list: Structure[]): number {
+  workshopBonus(list: Structure[]): number {
     return Math.min(BUILD.workshop.maxCounted, list.filter((s) => pieceById(s.piece)?.effect === 'workshop').length) * BUILD.workshop.pieces;
   }
   /** The base a crew member is building in: their crew's hall when the spot is within its radius. */

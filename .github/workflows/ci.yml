@@ -34,6 +34,7 @@ jobs:
           npx tsx scripts/progression-check.ts
           npx tsx scripts/building-check.ts
           npx tsx scripts/pets-check.ts
+          npx tsx scripts/territory-check.ts
 
       # Not `npm run build`: that also generates the world (~65 MB), which the
       # bundle does not import. Vite just copies client/public/world when it exists.

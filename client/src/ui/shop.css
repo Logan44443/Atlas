@@ -1,0 +1,36 @@
+/* Quartermaster (Phase 11): buy, sell, pardon and fast travel. The overlay and panel come from .mastery / .m-panel in style.css. */
+.shop .m-panel { width: min(660px, 96vw); }
+.shop .m-head .s-coins { color: #ffd76a; }
+.shop .m-head .s-bounty { color: #ff8a7a; }
+.s-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.s-tabs button { font: inherit; font-size: 13px; cursor: pointer; background: #1f2638; color: var(--muted); border: 1px solid #2c344a; border-radius: 6px; padding: 6px 14px; }
+.s-tabs button:hover { border-color: #56607a; }
+.s-tabs button.on { color: var(--ink); border-color: var(--accent); }
+.s-tabs .s-bag { margin-left: auto; color: var(--muted); font-size: 12px; }
+.s-tabs .s-bag.full { color: #ff8a7a; }
+.s-list { display: flex; flex-direction: column; gap: 6px; }
+.s-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px 76px auto; gap: 10px; align-items: center; padding: 6px 10px;
+  border-radius: 8px; background: #1a2030; border: 1px solid #2c344a; font-size: 13px; }
+.s-row.black { border-left: 3px solid #c22f2f; background: #211a20; }
+.s-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s-name small { color: var(--muted); font-size: 11px; }
+.s-name small.s-bm { color: #ff8a7a; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+.s-price { color: #ffd76a; text-align: right; white-space: nowrap; }
+.s-have { color: var(--muted); text-align: right; white-space: nowrap; font-size: 12px; }
+.s-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.shop .s-btns button { font: inherit; font-size: 12px; cursor: pointer; border-radius: 7px; padding: 4px 10px; border: 1px solid #c99a2e; background: #3a3018; color: #ffd76a; white-space: nowrap; }
+.shop .s-btns button.secondary { border-color: #2c344a; background: #1c2233; color: var(--ink); }
+.shop .s-btns button:disabled { opacity: 0.4; cursor: default; }
+.s-pardon { margin-top: 12px; border-color: #7a2a24; background: #261818; }
+.s-pardon .s-name { white-space: normal; flex-direction: column; align-items: flex-start; gap: 2px; }
+.s-rules { list-style: none; margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); font-size: 12px; color: var(--muted); line-height: 1.6; }
+.s-rules li::before { display: inline-block; width: 16px; content: '·'; color: var(--muted); }
+.s-rules li.ok::before { content: '✓'; color: #9fe39a; }
+.s-rules li.bad { color: #ffb0a0; }
+.s-rules li.bad::before { content: '✗'; color: #ff8a7a; }
+.s-empty { color: var(--muted); margin: 14px 4px; line-height: 1.5; }
+@media (max-width: 560px) {
+  .s-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .s-have { display: none; }
+  .s-btns { grid-column: 1 / -1; }
+}

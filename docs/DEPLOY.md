@@ -173,5 +173,5 @@ order, each in its own transaction. There is no separate release step.
 
 `.github/workflows/ci.yml` runs on every push and pull request: `npm ci`,
 `npx tsc --noEmit`, the browser-free rule checks (`progression-check`,
-`building-check`, `pets-check`) and `npx vite build`. It does not generate the world
+`building-check`, `pets-check`, `territory-check`) and `npx vite build`. It does not generate the world
 (the bundle does not import it) and runs no browser tests. It does not deploy.
