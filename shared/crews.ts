@@ -4,7 +4,9 @@
 // persists it (server/crews.ts).
 import crewsJson from '../data/crews.json';
 import { factionById, sideOf } from './factions';
-import { giveItems, hasItems, invTotal, sanitizeInv, takeItems, type Inventory } from './building';
+import { basePieces, crewRaidOpen, giveItems, hasItems, invTotal, sanitizeInv, takeItems, type Inventory } from './building';
+
+export { crewRaidOpen, crewRaidText } from './building';
 
 export const CREW = crewsJson;
 export type CrewRole = 'leader' | 'officer' | 'member';
@@ -62,7 +64,6 @@ export const crewLevelOf = (xp: number): number => {
   return l;
 };
 export const bankCap = (level: number): number => CREW.bank.base + CREW.bank.perLevel * (level - 1);
-export const basePieces = (level: number): number => CREW.base.pieces + CREW.base.piecesPerLevel * (level - 1);
 
 export function validCrewName(name: string): string | null {
   const n = name.trim();
@@ -76,20 +77,6 @@ export function validTag(tag: string): string | null {
   return null;
 }
 export const cleanTag = (raw: unknown): string => String(raw ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, CREW.tag.max);
-
-/** Is the raid window of a crew starting at `start` (UTC hour) open at `ms`? */
-export function crewRaidOpen(start: number, ms: number): boolean {
-  const h = (ms / 3_600_000) % 24;
-  return (h - start + 24) % 24 < CREW.raid.hours;
-}
-
-export function crewRaidText(start: number, ms: number): string {
-  const h = (ms / 3_600_000) % 24;
-  const into = (h - start + 24) % 24;
-  const fmt = (hours: number) => `${Math.floor(hours)} h ${Math.floor((hours % 1) * 60)} m`;
-  const hh = `${String(start).padStart(2, '0')}:00-${String((start + CREW.raid.hours) % 24).padStart(2, '0')}:00 UTC`;
-  return into < CREW.raid.hours ? `Raid window open (${hh}, ${fmt(CREW.raid.hours - into)} left)` : `Raid window ${hh} (opens in ${fmt((start - h + 24) % 24)})`;
-}
 
 /** Someone joining or founding a crew. */
 export interface CrewJoiner {
@@ -278,6 +265,21 @@ export class Crews {
     for (const [k, n] of Object.entries(want)) if (n - (moved[k] ?? 0) > 0) back[k] = n - (moved[k] ?? 0);
     giveItems(from, back, 1e9);
     return invTotal(back) ? (put ? 'The bank is full' : 'Your bag is full') : null;
+  }
+
+  /** Raiders beat the hall down: they carry off a share of every material in the bank (what fits in their bag). */
+  sack(c: Crew, bag: Inventory): Inventory {
+    const want: Inventory = {};
+    let room = CREW.sack.max;
+    for (const [k, n] of Object.entries(c.bank)) {
+      const take = Math.min(room, Math.floor(n * CREW.sack.share));
+      if (take <= 0) continue;
+      want[k] = take;
+      room -= take;
+    }
+    const got = giveItems(bag, want);
+    takeItems(c.bank, got);
+    return got;
   }
 
   /** The leader moves the daily raid window (not while it is open, at most once per cooldown). */

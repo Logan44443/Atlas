@@ -61,9 +61,12 @@ interface Remote {
   samples: Sample[];
 }
 
+/** `?server=` first, then the build's VITE_SERVER_URL (production, see docs/DEPLOY.md), else this host on NET.port. */
 export function defaultServerUrl(): string {
   const q = new URLSearchParams(location.search).get('server');
   if (q) return q;
+  const built = import.meta.env.VITE_SERVER_URL;
+  if (built) return built.replace(/\/+$/, '');
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.hostname || 'localhost'}:${NET.port}`;
 }

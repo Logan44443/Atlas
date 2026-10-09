@@ -1,5 +1,5 @@
 {
-  "_comment": "Factions (DESIGN section 4). hub: x/z centre (chosen on flat land), radius = flattened plaza, safeRadius = safe zone. perk numbers are applied as their systems arrive (bounties/XP Phase 7, shrines/raids Phase 11, mounts later).",
+  "_comment": "Factions (DESIGN section 4). hub: x/z centre (chosen on flat land), radius = flattened plaza, safeRadius = safe zone. perk: type + value (shrineSustain within radius m of a spirit shrine; offWindowRaids = damage scale outside a raid window, never below floor x max hp; mountSpeed also halves fast-travel prices by travelDiscount).",
   "sides": {
     "order": { "name": "Order", "color": "#4f8fe0" },
     "outlaw": { "name": "Outlaw", "color": "#d0473a" }
@@ -14,13 +14,13 @@
     {
       "id": "lantern", "name": "Lantern Order", "side": "order", "color": "#e0b33a", "trim": "#8a3a1f", "emblem": "🏮",
       "identity": "Monks who guard the spirit shrines.",
-      "perk": { "type": "shrineSustain", "value": 0.15, "text": "+15% healing and chi regeneration near shrines" },
+      "perk": { "type": "shrineSustain", "value": 0.15, "radius": 90, "text": "+15% healing and chi regeneration near shrines" },
       "hub": { "name": "Lantern Monastery", "x": -1090, "z": -490, "radius": 42, "safeRadius": 90, "style": "temple" }
     },
     {
       "id": "freeisles", "name": "Free Isles League", "side": "order", "color": "#2fa6a0", "trim": "#f2efe6", "emblem": "⚓",
       "identity": "Sailors and explorers.",
-      "perk": { "type": "mountSpeed", "value": 0.20, "text": "+20% mount speed; discounted sea travel" },
+      "perk": { "type": "mountSpeed", "value": 0.20, "travelDiscount": 0.5, "text": "+20% mount speed; half-price fast travel" },
       "hub": { "name": "Driftwood Harbor", "x": 740, "z": -1020, "radius": 44, "safeRadius": 92, "style": "harbor" }
     },
     {
@@ -32,7 +32,7 @@
     {
       "id": "ash", "name": "Ash Syndicate", "side": "outlaw", "color": "#5d5a55", "trim": "#e07a2c", "emblem": "🔥",
       "identity": "Smugglers and saboteurs.",
-      "perk": { "type": "offWindowRaids", "value": 1, "text": "Can raid bases outside the normal raid windows (with heavy limits)" },
+      "perk": { "type": "offWindowRaids", "value": 0.35, "floor": 0.5, "text": "Can raid bases outside the raid window at 35% damage, down to half health" },
       "hub": { "name": "Cinder Wharf", "x": 100, "z": 1230, "radius": 44, "safeRadius": 90, "style": "den" }
     },
     {

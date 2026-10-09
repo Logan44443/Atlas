@@ -1,0 +1,63 @@
+# Fly.io config for the shard server (Colyseus rooms + /api + /health + /metrics).
+# See docs/DEPLOY.md. Secrets are not kept here; set them with
+#   fly secrets set DATABASE_URL=postgres://user:pass@host:5432/db
+#   fly secrets set METRICS_TOKEN=...      (optional, see [metrics] below)
+#
+# Run exactly ONE machine: the camps registry and "one session per character"
+# live in the process's memory, so a second machine would show a different world.
+# First deploy with `fly deploy --ha=false`, or `fly scale count 1` afterwards.
+
+app = "four-winds-shards"
+primary_region = "iad" # change to the region closest to most players (`fly platform regions`)
+
+# Colyseus shuts down on SIGTERM: rooms disconnect and save their players, then camps flush.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Not bluegreen: that runs old and new machines side by side, each with its own camps.
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "2567"
+  LOG_FORMAT = "json"
+  # Fly's proxy passes the player's address here; the API rate limits key on it.
+  CLIENT_IP_HEADER = "Fly-Client-IP"
+
+[http_service]
+  internal_port = 2567 # data/net.json "port"
+  force_https = true
+  # Rooms hold live state in memory: never stop the machine for being idle.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # One WebSocket per player plus short API requests. Fly's default hard limit
+  # is 25 connections, far too low. Lower these once load tests show the real
+  # capacity of the VM below (a shard room holds 80 players).
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 800
+    hard_limit = 1000
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "15s"
+    timeout = "2s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+# Fly's managed Prometheus scrapes this over the private network (Grafana at
+# fly-metrics.net). It cannot send a token: if METRICS_TOKEN is set, remove this
+# section and scrape https://<app>.fly.dev/metrics with your own Prometheus instead.
+[metrics]
+  port = 2567
+  path = "/metrics"

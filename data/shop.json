@@ -1,0 +1,29 @@
+{
+  "_comment": "Quartermasters (hub vendors, Phase 11). They sell the `sell` list for coins and buy any material back at its price x buyBack (materials on neither list fetch `junk` coins each). Red Fang Triad members also see the black market (`blackMarket`) and can buy a bounty pardon for pardonPerInfamy coins per point of infamy. Talk to a Quartermaster of your own side.",
+  "buyBack": 0.4,
+  "junk": 1,
+  "vendorRange": 8,
+  "sell": [
+    { "id": "wood", "price": 3 },
+    { "id": "stone", "price": 3 },
+    { "id": "sand", "price": 3 },
+    { "id": "ore", "price": 8 },
+    { "id": "berries", "price": 4 },
+    { "id": "meat", "price": 8 },
+    { "id": "hide", "price": 6 },
+    { "id": "charcoal", "price": 10 },
+    { "id": "glass", "price": 14 },
+    { "id": "refined_ore", "price": 18 }
+  ],
+  "blackMarket": [
+    { "id": "magma_brick", "price": 30 },
+    { "id": "steam_core", "price": 40 },
+    { "id": "obsidian", "price": 45 },
+    { "id": "metal_plate", "price": 60 },
+    { "id": "steel_beam", "price": 80 },
+    { "id": "spirit_shard", "price": 120 }
+  ],
+  "pardonPerInfamy": 1.5,
+  "_travel": "Fast travel from a Quartermaster to any hub of your side, your camp or your crew hall: base + perKm x distance coins (Free Isles League pays less, see factions.json). Not within combatSeconds of a fight, and not with a bounty above maxInfamy.",
+  "travel": { "base": 25, "perKm": 30, "combatSeconds": 10, "maxInfamy": 300 }
+}

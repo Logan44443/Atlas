@@ -1,5 +1,5 @@
 {
-  "_comment": "Camp and base pieces (design section 10). size = [width, height, depth] in metres. A camp starts with a campfire (the core); every other piece must stand within rules.campRadius of your own campfire. solid pieces block movement and projectiles. tier: wood -> stone -> metal (spirit-warded comes later). effect: respawn (campfire), storage (chest), forge (forge recipes), vent (steam cloud that blinds enemies), shrine (+XP for your element), walkway (bridge/floor you can stand on).",
+  "_comment": "Camp and base pieces (design section 10). size = [width, height, depth] in metres. A camp starts with a campfire (the core); every other piece must stand within rules.campRadius of your own campfire. solid pieces block movement and projectiles. tier: wood -> stone -> metal -> spirit (ward = share of structure damage a spirit-warded piece shrugs off). rank = faction rank needed (standing.json). effect: respawn (campfire), storage (chest), forge (forge recipes), vent (steam cloud that blinds enemies), shrine (+XP for your element), walkway (bridge/floor you can stand on), hall (crew base core, on a plot, officers only; members build within crews.json base.radius), stable (keeps your pets fed nearby), workshop (+10 pieces to the camp or base limit).",
   "pieces": [
     { "id": "campfire",      "name": "Campfire",          "kind": "core",    "size": [1.6, 0.8, 1.6], "hp": 600,  "cost": { "wood": 5, "stone": 3 },             "solid": false, "effect": "respawn", "tier": "wood" },
     { "id": "tent",          "name": "Tent",              "kind": "deco",    "size": [3, 2.4, 3],     "hp": 200,  "cost": { "wood": 6 },                         "solid": true,  "tier": "wood" },
@@ -18,6 +18,13 @@
     { "id": "forge",         "name": "Forge",             "kind": "station", "size": [2.4, 2, 2],     "hp": 900,  "cost": { "stone": 10, "magma_brick": 2 },     "solid": true,  "effect": "forge", "tier": "stone" },
     { "id": "ice_lantern",   "name": "Ice lantern",       "kind": "deco",    "size": [0.6, 1.8, 0.6], "hp": 150,  "cost": { "ice_crystal": 1, "wood": 1 },       "solid": false, "tier": "wood" },
     { "id": "element_shrine", "name": "Element shrine",   "kind": "shrine",  "size": [2, 2.6, 2],     "hp": 900,  "cost": { "stone": 12, "glass": 2 },           "solid": true,  "effect": "shrine", "tier": "stone" },
-    { "id": "training_dummy", "name": "Training post",    "kind": "deco",    "size": [0.8, 1.9, 0.8], "hp": 300,  "cost": { "wood": 4 },                         "solid": true,  "tier": "wood" }
+    { "id": "training_dummy", "name": "Training post",    "kind": "deco",    "size": [0.8, 1.9, 0.8], "hp": 300,  "cost": { "wood": 4 },                         "solid": true,  "tier": "wood" },
+    { "id": "crew_hall",     "name": "Crew hall",         "kind": "core",    "size": [7, 4.5, 7],     "hp": 6000, "cost": { "wood": 40, "stone": 40, "refined_ore": 6 }, "solid": true, "effect": "hall", "tier": "stone" },
+    { "id": "faction_banner", "name": "Faction banner",   "kind": "deco",    "size": [0.6, 4.5, 0.6], "hp": 250,  "cost": { "wood": 4, "hide": 2 },              "solid": false, "tier": "wood",  "rank": 3 },
+    { "id": "pet_stable",    "name": "Pet stable",        "kind": "station", "size": [4, 2.8, 3],     "hp": 900,  "cost": { "wood": 16, "meat": 4 },             "solid": true,  "effect": "stable", "tier": "wood", "rank": 3 },
+    { "id": "workshop",      "name": "Workshop",          "kind": "station", "size": [3.4, 2.6, 2.6], "hp": 1000, "cost": { "wood": 12, "stone": 8, "refined_ore": 2 }, "solid": true, "effect": "workshop", "tier": "stone", "rank": 3 },
+    { "id": "metal_gate",    "name": "Metal gate",        "kind": "gate",    "size": [4, 3.4, 0.4],   "hp": 1700, "cost": { "metal_plate": 2, "steel_beam": 1 }, "solid": false, "tier": "metal", "rank": 5 },
+    { "id": "spirit_wall",   "name": "Spirit-warded wall", "kind": "wall",   "size": [4, 3.6, 0.6],   "hp": 2400, "cost": { "metal_plate": 2, "spirit_shard": 1, "glass": 2 }, "solid": true, "tier": "spirit", "ward": 0.3, "rank": 6 },
+    { "id": "spirit_gate",   "name": "Spirit-warded gate", "kind": "gate",   "size": [4, 3.6, 0.5],   "hp": 2000, "cost": { "metal_plate": 2, "spirit_shard": 1 }, "solid": false, "tier": "spirit", "ward": 0.3, "rank": 6 }
   ]
 }

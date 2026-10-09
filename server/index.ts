@@ -1,5 +1,6 @@
 // Four Winds shard server: Colyseus over WebSocket plus a tiny HTTP API.
 //   GET /health  -> ok
+//   GET /metrics -> Prometheus text (server/metrics.ts; Bearer METRICS_TOKEN when that is set)
 //   GET /shards  -> open world shards with player counts (for the join flow)
 //   /api/*       -> accounts and characters (server/api.ts)
 import http from 'node:http';
@@ -9,12 +10,22 @@ import { NET, ROOM_NAME } from '../shared/net';
 import { WorldRoom } from './worldRoom';
 import { openStore } from './db/store';
 import { createApi } from './api';
-import { initCamps, flushCamps } from './camps';
+import { initCamps, flushCamps, removeCrewBase } from './camps';
+import { initCrews, flushCrews, onDisband } from './crews';
+import { initTerritory, flushTerritory, territory } from './territory';
+import { serveMetrics } from './metrics';
 
 const port = Number(process.env.PORT ?? NET.port);
 const store = await openStore();
 WorldRoom.store = store;
+// Crews before camps: crew base pieces belong to crews.
+await initCrews(store);
 await initCamps(store);
+await initTerritory(store);
+onDisband((c) => {
+  removeCrewBase(c.id);
+  territory.dropCrew(c.id);
+});
 const api = createApi(store);
 
 const httpServer = http.createServer(async (req, res) => {
@@ -22,6 +33,10 @@ const httpServer = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.url === '/health') {
     res.end('ok');
+    return;
+  }
+  if (req.url === '/metrics') {
+    await serveMetrics(req, res);
     return;
   }
   if (req.url === '/shards') {
@@ -43,5 +58,9 @@ gameServer.define(ROOM_NAME, WorldRoom);
 
 await gameServer.listen(port);
 console.log(`Four Winds shard server on :${port}`);
-// Write pending camp changes before exiting (rooms have saved their players by then).
-gameServer.onShutdown(() => flushCamps());
+// Write pending camp, crew and territory changes before exiting (rooms have saved their players by then).
+gameServer.onShutdown(async () => {
+  await flushCamps();
+  await flushCrews();
+  await flushTerritory();
+});

@@ -13,18 +13,32 @@ import { spawnDummies, updateDummy, type DummyBrain } from '../shared/sim/dummie
 import { spawnNpcs, spawnMasters, updateNpc, type NpcBrain } from '../shared/sim/npcs';
 import { elementContextAt, worldDays, nightAt } from '../shared/clock';
 import { QuestRules, sanitizeArts, equippedAbility, artById, ARTS, masterId, type QuestNews } from '../shared/arts';
-import { NET, type CastMsg, type JoinOptions, type MoveMsg, type WelcomeMsg, type CorrectMsg, type V3, type XpMsg, type PartyInfo, type InviteMsg } from '../shared/net';
-import { XpRules, addXp, computeMods, newProgress, sanitizeAlloc, PROG, type Progress, type XpAward } from '../shared/progression';
+import {
+  NET, type CastMsg, type JoinOptions, type MoveMsg, type WelcomeMsg, type CorrectMsg, type V3, type XpMsg, type PartyInfo, type InviteMsg,
+  type ChatMsg, type ChatSend, type CrewAction, type CrewInviteMsg, type ShopAction, type TerrMsg,
+} from '../shared/net';
+import { XpRules, addXp, computeMods, newProgress, pointsSpent, sanitizeAlloc, PROG, type Progress, type XpAward } from '../shared/progression';
+import { OrderRules, addPoints, crewRank, dropRanks, payCoins, rankOf, respecCost, sanitizeStanding } from '../shared/standing';
+import {
+  boonFor, bossRewards, buy, captureRewards, hatchEggs, heldRewards, incomeRewards, killRewards, mountScale, pardon, sell, SHOP, syncInfamy, travel,
+  travelSpots, xpScale, type FactionNews,
+} from '../shared/factionRules';
+import { pointById, type TerrNews } from '../shared/territory';
+import { WarBands } from '../shared/sim/warbands';
+import { CREW, crewLevelOf, roleAtLeast, type CrewJoiner, type CrewRole } from '../shared/crews';
+import { territory, reportPresence, dropReport, onTerritory, terrNow } from './territory';
+import { crews, crewChanged, crewXp, leaveCrew, pushCrew } from './crews';
+import { directory, sendTo, byName } from './online';
 import { Parties } from './parties';
 import { SLOTS, type Slot } from '../shared/combat';
 import { EntityState, WorldState } from './schema';
-import { factionById, hubSpawn, PVP } from '../shared/factions';
+import { factionById, hubSpawn, perkOf, PVP, zoneAt } from '../shared/factions';
 import { validateName } from '../shared/names';
 import accountData from '../data/accounts.json';
 import timeData from '../data/time.json';
 import type { Account, CharacterRow, Store } from './db/store';
 import { camps, onlineChars } from './camps';
-import { BUILD, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory, type Structure } from '../shared/building';
+import { BUILD, giveItems, itemsText, moveItems, pieceById, plotAt, sanitizeInv, type Builder, type Inventory, type Structure } from '../shared/building';
 import { CraftRules, type Crafter, type Crafted } from '../shared/crafting';
 import { campRespawn, milestoneXp, shrineBonus, ventTick } from '../shared/campRules';
 import { Wildlife, type WildNews } from '../shared/sim/wildlife';
@@ -74,7 +88,15 @@ interface PlayerData {
   raidNoticeT: number;
   /** sim time until which flying-mount heights are allowed (after getting off mid-air) */
   flyGrace: number;
+  /** wall times of recent chat messages (rate limit) */
+  chatT: number[];
 }
+
+/** Chat: how far /say carries, and how many messages fit in the rate window. */
+const SAY_RANGE = 40;
+const CHAT_BURST = 5;
+const CHAT_WINDOW_MS = 6000;
+const CHAT_MAX = 200;
 
 /** Structures within this many metres are streamed to a client. */
 const STRUCT_RADIUS = 320;
@@ -106,6 +128,9 @@ export class WorldRoom extends Room<WorldState> {
   private ventT = 0;
   private wild = new Wildlife(this.sim, groundAt);
   private pets = new PetRules(this.sim, this.wild, groundAt);
+  private orders = new OrderRules();
+  private bands = new WarBands(this.sim, groundAt);
+  private unlistenTerr: (() => void) | null = null;
 
   onCreate(): void {
     const state = new WorldState();
@@ -122,6 +147,10 @@ export class WorldRoom extends Room<WorldState> {
     this.onPetMessages();
     this.unlisten = camps.listen((st, change) => this.onStructChange(st, change));
     this.onBuildMessages();
+    // Territory wars, crews, chat and the Quartermaster (Phase 11).
+    this.unlistenTerr = onTerritory((news) => this.onTerrNews(news));
+    if (territory.isOpen(terrNow())) this.bands.raise((id) => territory.states.get(id)?.owner ?? '');
+    this.onFactionMessages();
 
     this.onMessage('move', (c, m: MoveMsg) => this.onMove(c, m));
     this.onMessage('cast', (c, m: CastMsg) => this.onCast(c, m));
@@ -209,8 +238,20 @@ export class WorldRoom extends Room<WorldState> {
       // Beastkeepers hand out rare pet quests.
       const keeper = this.sim.entities.get(String(npcId));
       if (p && keeper?.role === 'beast' && keeper.pos.distanceTo(p.entity.pos) <= 8) {
-        c.send('quest', { art: '', npc: keeper.id, line: this.pets.keeperTalk(p) });
+        // Pet eggs earned by faction rank come first.
+        const egg = keeper.faction === p.entity.faction ? hatchEggs(p, this.pets, Date.now()) : null;
+        c.send('quest', { art: '', npc: keeper.id, line: egg ?? this.pets.keeperTalk(p) });
         c.send('progress', p.progress);
+        return;
+      }
+      // Envoys hand out faction orders.
+      if (p && keeper?.role === 'quest' && keeper.pos.distanceTo(p.entity.pos) <= 8) {
+        const r = this.orders.talk(p, keeper.faction);
+        c.send('quest', { art: '', npc: keeper.id, line: r.line });
+        const out: FactionNews[] = [{ t: 'progress', id: p.entity.id }];
+        if (r.reward) out.unshift({ t: 'xp', id: p.entity.id, amount: r.reward.xp, reason: r.reward.reason }, { t: 'notice', id: p.entity.id, text: `+${r.reward.coins} coins, +${r.reward.points} rank points` });
+        if (r.rankUp) out.push({ t: 'notice', id: p.entity.id, text: `Faction rank ${p.progress.rank}!` });
+        this.applyFaction(out);
         return;
       }
       const art = ARTS.find((a) => masterId(a.id) === npcId);
@@ -241,10 +282,13 @@ export class WorldRoom extends Room<WorldState> {
     this.onMessage('respec', (c) => {
       const p = this.players.get(c.sessionId);
       if (!p) return;
+      // Free while you're learning; after that it costs coins per point refunded.
+      const cost = respecCost(p.progress.level, pointsSpent(p.progress.mastery));
+      if (!payCoins(p.progress.standing, cost)) return c.send('notice', { text: `A respec costs ${cost} coins; you have ${p.progress.standing.coins}`, warn: true });
       p.progress.mastery = {};
       setMods(p.entity, computeMods(p.entity.element, {}));
       c.send('progress', p.progress);
-      c.send('notice', { text: 'Mastery points refunded' });
+      c.send('notice', { text: cost ? `Mastery points refunded (${cost} coins)` : 'Mastery points refunded' });
     });
 
     // Parties: same side only; invites need the target to be close.
@@ -307,9 +351,10 @@ export class WorldRoom extends Room<WorldState> {
       pos = new Vector3(sp.x, 0, sp.z);
     }
     pos.y = Math.max(groundAt(pos.x, pos.z), worldData.seaLevel);
+    const standing = sanitizeStanding(c.standing);
     const progress = newProgress({
-      level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])], rank: c.rank, arts: sanitizeArts(c.element, c.arts),
-      inv: sanitizeInv(c.inv), milestones: Array.isArray(c.milestones) ? c.milestones.map(String) : [], pets: sanitizePets(c.pets),
+      level: c.level, xp: c.xp, discovered: [...(c.discovered ?? [])], rank: rankOf(standing.points), arts: sanitizeArts(c.element, c.arts),
+      inv: sanitizeInv(c.inv), milestones: Array.isArray(c.milestones) ? c.milestones.map(String) : [], pets: sanitizePets(c.pets), standing,
     });
     progress.mastery = sanitizeAlloc(c.element, progress.level, c.mastery);
     const entity = createEntity({
@@ -325,10 +370,22 @@ export class WorldRoom extends Room<WorldState> {
     this.players.set(client.sessionId, {
       entity, last: pos.clone(), lastT: Date.now(), allowance: 0, lastDodge: -1e9, invSince: -1, swimming: false, aim: new Vector3(0, 0, 1), seq: 0, deadT: 0,
       characterId: c.id, pvpToggleT: -1e9, progress, respawnedAt: this.sim.time, still: 0, stillFrom: pos.clone(),
-      knownStructs: new Set(), raidNoticeT: -1e9, flyGrace: -1e9,
+      knownStructs: new Set(), raidNoticeT: -1e9, flyGrace: -1e9, chatT: [],
     });
     onlineChars.add(c.id);
     camps.touch(c.id);
+    const pd = this.players.get(client.sessionId)!;
+    syncInfamy(pd, Date.now());
+    entity.boon = boonFor(entity, territory);
+    // Other shards reach this player through the directory (crews, faction chat, whispers).
+    directory.set(c.id, { charId: c.id, name: c.name, faction: c.faction, side: entity.side, room: this.roomId, send: (t, m) => client.send(t, m) });
+    const crew = crews.of(c.id);
+    if (crew) {
+      crews.touchMember(c.id, { name: c.name, level: c.level });
+      entity.tag = crew.tag;
+      camps.touchCrew(crew.id);
+      pushCrew(crew);
+    }
     const st = this.newState(entity);
     this.state.entities.set(entity.id, st);
     client.view = new StateView();
@@ -336,6 +393,9 @@ export class WorldRoom extends Room<WorldState> {
     const welcome: WelcomeMsg = { id: client.sessionId, shard: this.roomId, spawn: arr(pos), serverTime: this.now(), tickRate: NET.tickRate, characterId: c.id, faction: c.faction, level: c.level, progress };
     client.send('welcome', welcome);
     this.syncStructs(client, this.players.get(client.sessionId)!);
+    client.send('terr', this.terrMsg());
+    const inv = crews.pendingInvite(c.id, Date.now());
+    if (inv) this.sendCrewInvite(c.id, inv.crew, inv.fromName, inv.expires);
     console.log(`[${this.roomId}] ${entity.name} (${c.faction} ${c.element}) joined (${this.clients.length}/${this.maxClients})`);
   }
 
@@ -345,7 +405,7 @@ export class WorldRoom extends Room<WorldState> {
     return WorldRoom.store
       .saveCharacter(p.characterId, {
         pos: [+e.pos.x.toFixed(2), +e.pos.y.toFixed(2), +e.pos.z.toFixed(2)], level: pr.level, xp: pr.xp, mastery: pr.mastery, discovered: pr.discovered,
-        arts: pr.arts, rank: pr.rank, inv: pr.inv, milestones: pr.milestones, pets: pr.pets,
+        arts: pr.arts, rank: pr.rank, inv: pr.inv, milestones: pr.milestones, pets: pr.pets, standing: pr.standing,
       })
       .catch((err) => console.error('[db] save failed', err));
   }
@@ -367,7 +427,7 @@ export class WorldRoom extends Room<WorldState> {
   private applyQuestNews(p: PlayerData, news: QuestNews): void {
     const c = this.clientOf(p.entity.id);
     if (news.notice) c?.send('notice', { text: news.notice });
-    if (news.rankLoss) p.progress.rank = Math.max(1, p.progress.rank - news.rankLoss);
+    if (news.rankLoss) dropRanks(p.progress, news.rankLoss);
     if (news.learned) this.applyArts(p);
     c?.send('progress', p.progress);
   }
@@ -382,8 +442,12 @@ export class WorldRoom extends Room<WorldState> {
     const p = this.players.get(a.id);
     if (!p) return;
     // An element shrine at a nearby camp of your side adds a little XP.
-    if (a.amount > 0) a = { ...a, amount: Math.round(a.amount * shrineBonus(camps, p.entity)) };
+    // ... and every point your faction holds a little more.
+    if (a.amount > 0) a = { ...a, amount: Math.round(a.amount * shrineBonus(camps, p.entity) * xpScale(p.entity, territory)) };
     const levelUp = addXp(p.progress, a.amount);
+    const crew = crews.of(p.characterId);
+    if (crew && a.amount > 0) crewXp(crew, a.amount);
+    if (crew && levelUp) crews.touchMember(p.characterId, { level: p.progress.level });
     if (levelUp) {
       const e = p.entity;
       e.level = p.progress.level;
@@ -408,16 +472,47 @@ export class WorldRoom extends Room<WorldState> {
     if (victim?.kind === 'creature') this.applyWild(this.wild.onDeath(victimId, sourceId && this.players.has(sourceId) ? sourceId : null, this.players));
     const killer = sourceId ? this.players.get(sourceId) : undefined;
     if (!victim || !killer || victim === killer.entity) return;
-    for (const a of this.xp.onKill(victim, killer, this.players, this.parties.membersOf(killer.entity.id), this.sim.time)) this.grant(a);
+    const awards = this.xp.onKill(victim, killer, this.players, this.parties.membersOf(killer.entity.id), this.sim.time);
+    const pvp = victim.kind === 'player';
+    // Red Fang Triad: more XP from PvP.
+    for (const a of awards) {
+      const who = this.players.get(a.id)?.entity;
+      this.grant(pvp && who ? { ...a, amount: Math.round(a.amount * (1 + perkOf(who.faction, 'pvpXp'))) } : a);
+    }
+    const paid = awards.some((a) => a.id === killer.entity.id && a.amount > 0);
+    this.applyFaction(killRewards(victim, killer, pvp ? this.players.get(victim.id) : undefined, paid, Date.now(), this.orders));
     const night = this.night();
     for (const n of this.quests.onKill(killer, victim, night)) this.applyQuestNews(killer, n);
+  }
+
+  /** Faction rewards: XP through grant(), messages, fresh progress. */
+  private applyFaction(list: FactionNews[]): void {
+    const dirty = new Set<string>();
+    for (const n of list) {
+      const p = this.players.get(n.id);
+      if (!p) continue;
+      if (n.t === 'xp') this.grant({ id: n.id, amount: n.amount, reason: n.reason });
+      else if (n.t === 'notice') this.clientOf(n.id)?.send('notice', n.warn ? { text: n.text, warn: true } : { text: n.text });
+      else dirty.add(n.id);
+    }
+    for (const id of dirty) this.clientOf(id)?.send('progress', this.players.get(id)?.progress);
   }
 
   // ---- camps and crafting (Phase 9) ------------------------------------------
 
   private builder(p: PlayerData): Builder {
     const e = p.entity;
-    return { charId: p.characterId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: p.progress.inv };
+    const c = crews.of(p.characterId);
+    const role = crews.memberOf(p.characterId)?.role;
+    return {
+      charId: p.characterId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: p.progress.inv, rank: p.progress.rank,
+      crew: c && role ? { id: c.id, tag: c.tag, officer: roleAtLeast(role, 'officer'), level: crewLevelOf(c.xp), raidStart: c.raidStart } : null,
+    };
+  }
+
+  /** Crew chests are shared by the crew; camp chests are private. */
+  private canOpen(st: Structure, p: PlayerData): boolean {
+    return st.owner === p.characterId ? !st.crew || crews.of(p.characterId)?.id === st.crew : !!st.crew && crews.of(p.characterId)?.id === st.crew;
   }
 
   private crafter(p: PlayerData): Crafter {
@@ -472,7 +567,7 @@ export class WorldRoom extends Room<WorldState> {
     this.onMessage('chest', (c, m: { id?: string; items?: Inventory; put?: boolean }) => {
       const p = this.players.get(c.sessionId);
       const chest = m?.id ? camps.all.get(String(m.id)) : undefined;
-      if (!p || !chest?.store || chest.owner !== p.characterId) return;
+      if (!p || !chest?.store || !this.canOpen(chest, p)) return;
       if (Math.hypot(chest.x - p.entity.pos.x, chest.z - p.entity.pos.z) > 5) return say(c, 'Get closer to the chest', true);
       const r = moveItems(p.progress.inv, chest.store, sanitizeInv(m.items, 1e6), !!m.put);
       if (r) say(c, r, true);
@@ -559,6 +654,9 @@ export class WorldRoom extends Room<WorldState> {
           c?.send('notice', { text: this.pets.endTrial(p, n.pet, n.won, Date.now()), warn: !n.won });
           c?.send('progress', p.progress);
           break;
+        case 'boss':
+          this.applyFaction(bossRewards(p, n.tier, this.orders));
+          break;
       }
     }
   }
@@ -578,8 +676,9 @@ export class WorldRoom extends Room<WorldState> {
   private onStructHit(ev: Extract<SimEvent, { t: 'structHit' }>, out: SimEvent[]): void {
     const p = this.players.get(ev.source);
     if (!p) return;
-    const r = camps.damage(ev.id, ev.amount, { side: p.entity.side, element: p.entity.element }, this.now());
+    const r = camps.damage(ev.id, ev.amount, { side: p.entity.side, element: p.entity.element, faction: p.entity.faction }, this.now());
     if (!r) return;
+    if (r.kind === 'hit' && r.sacked) this.sackBase(p, r.s);
     if (r.kind === 'refused') {
       if (this.sim.time - p.raidNoticeT > 8) {
         p.raidNoticeT = this.sim.time;
@@ -606,9 +705,24 @@ export class WorldRoom extends Room<WorldState> {
     }
   }
 
-  /** Chest contents are private to their owner. */
+  /** Chest contents are private to their owner (crew chests to the crew). */
   private structFor(st: Structure, p: PlayerData): Structure {
-    return st.store && st.owner !== p.characterId ? { ...st, store: undefined } : st;
+    return st.store && !this.canOpen(st, p) ? { ...st, store: undefined } : st;
+  }
+
+  /** A raider beat a crew hall down in its raid window: they carry off part of the crew bank. */
+  private sackBase(p: PlayerData, hall: Structure): void {
+    const c = hall.crew ? crews.byId.get(hall.crew) : undefined;
+    if (!c) return;
+    const got = crews.sack(c, p.progress.inv);
+    crewChanged(c);
+    this.grant({ id: p.entity.id, amount: CREW.sack.xpPerLevel * p.progress.level, reason: `sacked the [${c.tag}] base` });
+    const out: FactionNews[] = [];
+    if (addPoints(p.progress, CREW.sack.points)) out.push({ t: 'rank', id: p.entity.id, rank: p.progress.rank });
+    this.applyFaction(out);
+    this.clientOf(p.entity.id)?.send('notice', { text: Object.keys(got).length ? `Sacked the [${c.tag}] crew bank: ${itemsText(got)}` : `Sacked the [${c.tag}] base (its bank was empty)` });
+    this.clientOf(p.entity.id)?.send('progress', p.progress);
+    for (const m of c.members) sendTo(m.charId, 'announce', `${p.entity.name} sacked your crew base!`);
   }
 
   /** Stream structures in and out of a client's range. */
@@ -635,6 +749,326 @@ export class WorldRoom extends Room<WorldState> {
 
   onDispose(): void {
     this.unlisten?.();
+    this.unlistenTerr?.();
+    dropReport(this.roomId);
+  }
+
+  // ---- territory, standing, crews, chat, shop (Phase 11) ------------------------------
+
+  /** Once a second per player: buffs, bounty decay, visit orders, crew tag, pet stables. */
+  private factionTick(p: PlayerData, now: number): void {
+    const e = p.entity;
+    e.boon = boonFor(e, territory);
+    syncInfamy(p, now);
+    e.tag = crews.of(p.characterId)?.tag ?? '';
+    const note = this.orders.tick(p);
+    if (note) {
+      this.clientOf(e.id)?.send('notice', { text: note });
+      this.clientOf(e.id)?.send('progress', p.progress);
+    }
+    // A pet stable of your side keeps your pets fed.
+    const pets = p.progress.pets.owned;
+    if (pets.some((x) => x.fed < 99 || now - x.fedAt > 60_000) && camps.effectNear(e.pos.x, e.pos.z, 'stable', BUILD.stableRadius, (s) => s.side === e.side)) {
+      for (const x of pets) {
+        x.fed = 100;
+        x.fedAt = now;
+      }
+      this.clientOf(e.id)?.send('progress', p.progress);
+    }
+  }
+
+  private terrMsg(): TerrMsg {
+    const now = terrNow();
+    return {
+      open: territory.isOpen(now),
+      text: territory.text(now),
+      points: territory.snapshot(),
+      halls: camps.halls().map((h) => ({ plot: plotAt(h.x, h.z)?.id ?? '', tag: h.tag ?? '', faction: h.faction, x: h.x, z: h.z })),
+    };
+  }
+
+  /** The territory war moved on: announce it and reward this shard's players. */
+  private onTerrNews(news: TerrNews[]): void {
+    const byChar = new Map([...this.players.values()].map((p) => [p.characterId, p]));
+    for (const n of news) {
+      switch (n.t) {
+        case 'war':
+          this.broadcast('announce', n.text);
+          if (n.open) this.bands.raise((id) => territory.states.get(id)?.owner ?? '');
+          else this.bands.disband();
+          break;
+        case 'captured': {
+          this.broadcast('announce', n.text);
+          const pt = pointById(n.point)!;
+          for (const who of n.by) {
+            const p = byChar.get(who.charId);
+            if (p) this.applyFaction(captureRewards(p, pt, this.orders));
+          }
+          break;
+        }
+        case 'lost':
+          this.broadcast('notice', { text: n.text, warn: true });
+          break;
+        case 'income': {
+          // A crew's points pay its bank (server/territory.ts); the rest pay their faction's players a little.
+          if (n.crew) break;
+          const pt = pointById(n.point)!;
+          for (const p of this.players.values()) {
+            if (p.entity.faction === n.faction) this.applyFaction(incomeRewards(p, pt, {}, Math.ceil(n.coins / 4)));
+          }
+          break;
+        }
+        case 'held':
+          for (const p of this.players.values()) if (p.entity.faction === n.faction) this.applyFaction(heldRewards(p, n.points.length));
+          break;
+      }
+    }
+  }
+
+  private onFactionMessages(): void {
+    const say = (c: Client, text: string, warn = false) => c.send('notice', warn ? { text, warn } : { text });
+    this.onMessage('chat', (c, m: ChatSend) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !m || typeof m.text !== 'string') return;
+      this.onChat(c, p, m);
+    });
+    this.onMessage('crew', (c, m: CrewAction) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !m || typeof m.a !== 'string') return;
+      const err = this.onCrew(c, p, m);
+      if (err) say(c, err, true);
+    });
+    this.onMessage('shop', (c, m: ShopAction) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !m || typeof m.a !== 'string') return;
+      const npc = this.sim.entities.get(String(m.npc));
+      if (!npc || npc.role !== 'vendor' || npc.side !== p.entity.side || npc.pos.distanceTo(p.entity.pos) > SHOP.vendorRange) return say(c, 'Talk to a Quartermaster of your side', true);
+      const now = Date.now();
+      let text = '';
+      if (m.a === 'buy') text = buy(p, String(m.item), Number(m.n));
+      else if (m.a === 'sell') text = sell(p, String(m.item), Number(m.n));
+      else if (m.a === 'pardon') text = pardon(p, now);
+      else if (m.a === 'travel') {
+        const camp = camps.campfireOf(p.characterId);
+        const crew = crews.of(p.characterId);
+        const hall = crew ? camps.hallOf(crew.id) : undefined;
+        const spot = travelSpots(p.entity, camp ?? null, hall ? { x: hall.x, z: hall.z, name: `[${crew!.tag}] crew hall` } : null).find((x) => x.id === m.dest);
+        const r = travel(p, spot, this.sim.time, now);
+        if (typeof r === 'string') text = r;
+        else {
+          const e = p.entity;
+          e.pos.set(r.x, Math.max(groundAt(r.x, r.z), worldData.seaLevel) + 0.2, r.z);
+          p.last.copy(e.pos);
+          p.lastT = now;
+          c.send('warp', arr(e.pos));
+          text = r.text;
+        }
+      }
+      if (text) say(c, text);
+      c.send('progress', p.progress);
+    });
+    if (!DEV) return;
+    // Tests: force the war open or shut, speed captures up, give coins or rank points.
+    this.onMessage('dev:war', (_c, on: boolean | null) => {
+      territory.forceWar = on === null ? null : !!on;
+    });
+    this.onMessage('dev:warRate', (_c, n: number) => {
+      if (Number.isFinite(n) && n > 0) territory.rateScale = Math.min(100, n);
+    });
+    this.onMessage('dev:coins', (c, n: number) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !Number.isFinite(n)) return;
+      p.progress.standing.coins = Math.max(0, p.progress.standing.coins + Math.round(n));
+      c.send('progress', p.progress);
+    });
+    this.onMessage('dev:points', (c, n: number) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !Number.isFinite(n) || n <= 0) return;
+      addPoints(p.progress, n);
+      c.send('progress', p.progress);
+    });
+  }
+
+  // ---- chat ----------------------------------------------------------------------
+
+  private onChat(c: Client, p: PlayerData, m: ChatSend): void {
+    const text = m.text.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, CHAT_MAX);
+    if (!text) return;
+    const now = Date.now();
+    p.chatT = p.chatT.filter((t) => now - t < CHAT_WINDOW_MS);
+    if (p.chatT.length >= CHAT_BURST) return c.send('notice', { text: 'You are sending messages too quickly', warn: true });
+    p.chatT.push(now);
+    const e = p.entity;
+    const msg: ChatMsg = { ch: m.ch, from: e.name, text, faction: e.faction, ...(e.tag ? { tag: e.tag } : {}) };
+    switch (m.ch) {
+      case 'say':
+        for (const o of this.players.values()) if (o.entity.pos.distanceTo(e.pos) <= SAY_RANGE) this.clientOf(o.entity.id)?.send('chat', msg);
+        break;
+      case 'shard':
+        this.broadcast('chat', msg);
+        break;
+      case 'faction':
+        for (const d of directory.values()) if (d.faction === e.faction) d.send('chat', msg);
+        break;
+      case 'crew': {
+        const crew = crews.of(p.characterId);
+        if (!crew) return c.send('chat', { ch: 'system', from: '', text: 'You are not in a crew' } satisfies ChatMsg);
+        for (const mem of crew.members) sendTo(mem.charId, 'chat', msg);
+        break;
+      }
+      case 'party': {
+        const ids = this.parties.membersOf(e.id);
+        if (ids.length < 2) return c.send('chat', { ch: 'system', from: '', text: 'You are not in a party' } satisfies ChatMsg);
+        for (const id of ids) this.clientOf(id)?.send('chat', msg);
+        break;
+      }
+      case 'whisper': {
+        const to = byName(String(m.to ?? ''));
+        if (!to) return c.send('chat', { ch: 'system', from: '', text: `${m.to ?? 'They'} is not online` } satisfies ChatMsg);
+        to.send('chat', { ...msg, to: to.name });
+        if (to.charId !== p.characterId) c.send('chat', { ...msg, to: to.name });
+        break;
+      }
+    }
+  }
+
+  // ---- crews ---------------------------------------------------------------------
+
+  private joiner(p: PlayerData): CrewJoiner {
+    const e = p.entity;
+    return { charId: p.characterId, name: e.name, faction: e.faction, level: p.progress.level, element: e.element ?? '' };
+  }
+
+  private sendCrewInvite(charId: string, crewId: string, fromName: string, expires: number): void {
+    const c = crews.byId.get(crewId);
+    if (!c) return;
+    const msg: CrewInviteMsg = { crew: c.id, name: c.name, tag: c.tag, from: fromName, expires: Math.max(0, Math.round((expires - Date.now()) / 1000)) };
+    sendTo(charId, 'crewInvite', msg);
+  }
+
+  /** One crew panel action. Returns why it failed, or null. */
+  private onCrew(c: Client, p: PlayerData, m: CrewAction): string | null {
+    const now = Date.now();
+    const me = p.characterId;
+    const crew = crews.of(me);
+    switch (m.a) {
+      case 'create': {
+        const f = CREW.found;
+        if (p.progress.level < f.minLevel) return `Founding a crew needs level ${f.minLevel}`;
+        if (p.progress.rank < crewRank()) return `Founding a crew needs faction rank ${crewRank()}`;
+        if (p.progress.standing.coins < f.coins) return `Founding a crew costs ${f.coins} coins`;
+        const r = crews.create(this.joiner(p), String(m.name ?? ''), String(m.tag ?? ''), now);
+        if (typeof r === 'string') return r;
+        payCoins(p.progress.standing, f.coins);
+        p.entity.tag = r.tag;
+        crewChanged(r);
+        c.send('progress', p.progress);
+        c.send('notice', { text: `You founded [${r.tag}] ${r.name}` });
+        return null;
+      }
+      case 'invite': {
+        const t = this.players.get(String(m.target)) ?? [...this.players.values()].find((o) => o.entity.name.toLowerCase() === String(m.target).toLowerCase());
+        const d = t ? directory.get(t.characterId) : byName(String(m.target));
+        if (!d) return `${m.target} is not online`;
+        const who: CrewJoiner = t ? this.joiner(t) : { charId: d.charId, name: d.name, faction: d.faction, level: 1, element: '' };
+        const err = crews.invite(me, who, now);
+        if (err) return err;
+        this.sendCrewInvite(d.charId, crew!.id, p.entity.name, now + CREW.inviteSeconds * 1000);
+        c.send('notice', { text: `Invited ${d.name} to [${crew!.tag}]` });
+        return null;
+      }
+      case 'accept': {
+        const inv = crews.pendingInvite(me, now);
+        const r = crews.accept(this.joiner(p), now);
+        if (typeof r === 'string') return r;
+        p.entity.tag = r.tag;
+        camps.touchCrew(r.id);
+        crewChanged(r);
+        for (const mem of r.members) sendTo(mem.charId, 'notice', { text: `${p.entity.name} joined [${r.tag}]` });
+        if (inv) sendTo(inv.from, 'notice', { text: `${p.entity.name} accepted your invite` });
+        return null;
+      }
+      case 'decline': {
+        const inv = crews.decline(me);
+        if (inv) sendTo(inv.from, 'notice', { text: `${p.entity.name} declined your crew invite`, warn: true });
+        return null;
+      }
+      case 'leave': {
+        const r = leaveCrew(me);
+        if (!r) return 'You are not in a crew';
+        p.entity.tag = '';
+        c.send('notice', { text: r.disbanded ? `[${r.crew.tag}] ${r.crew.name} disbanded` : `You left [${r.crew.tag}]` });
+        for (const mem of r.crew.members) sendTo(mem.charId, 'notice', { text: `${p.entity.name} left the crew` });
+        return null;
+      }
+      case 'kick': {
+        const target = String(m.charId);
+        const name = crews.memberOf(target)?.name ?? 'They';
+        const r = crews.kick(me, target);
+        if (typeof r === 'string') return r;
+        sendTo(target, 'crew', null);
+        sendTo(target, 'notice', { text: `You were removed from [${r.tag}]`, warn: true });
+        crewChanged(r);
+        c.send('notice', { text: `${name} was removed from the crew` });
+        return null;
+      }
+      case 'role': {
+        const err = crews.setRole(me, String(m.charId), m.role as CrewRole);
+        if (err) return err;
+        crewChanged(crew!);
+        return null;
+      }
+      case 'raid': {
+        const err = crews.setRaid(me, Number(m.hour), now);
+        if (err) return err;
+        const hall = camps.hallOf(crew!.id);
+        if (hall) {
+          hall.raidStart = crew!.raidStart;
+          camps.changed(hall);
+        }
+        crewChanged(crew!);
+        c.send('notice', { text: `Raid window moved to ${String(crew!.raidStart).padStart(2, '0')}:00 UTC` });
+        return null;
+      }
+      case 'motd': {
+        const role = crews.memberOf(me)?.role;
+        if (!crew || !role || !roleAtLeast(role, 'officer')) return 'Only officers and the leader set the crew message';
+        crew.motd = String(m.text ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 140);
+        crewChanged(crew);
+        return null;
+      }
+      case 'bank':
+      case 'coins': {
+        if (!crew) return 'You are not in a crew';
+        // The bank opens at the crew hall or inside your own faction's hub.
+        const e = p.entity;
+        const hall = camps.hallOf(crew.id);
+        const zone = zoneAt(e.pos.x, e.pos.z);
+        const atHall = !!hall && Math.hypot(hall.x - e.pos.x, hall.z - e.pos.z) <= CREW.bank.range + 4;
+        if (!atHall && !(zone.kind === 'safe' && zone.faction === e.faction)) return 'The crew bank opens at your crew hall or in your faction hub';
+        if (m.a === 'bank') {
+          const err = crews.bankMove(me, p.progress.inv, sanitizeInv(m.items, 1e6), !!m.put);
+          if (err) c.send('notice', { text: err, warn: true });
+        } else {
+          const n = Math.max(0, Math.floor(Number(m.n) || 0));
+          if (!n) return 'How many coins?';
+          if (m.put) {
+            if (!payCoins(p.progress.standing, n)) return "You don't have that many coins";
+            crew.coins += n;
+          } else {
+            const role = crews.memberOf(me)?.role;
+            if (!role || !roleAtLeast(role, CREW.withdraw as CrewRole)) return `Only ${CREW.withdraw}s and the leader take from the bank`;
+            if (crew.coins < n) return "The bank doesn't hold that many coins";
+            crew.coins -= n;
+            p.progress.standing.coins += n;
+          }
+        }
+        crewChanged(crew);
+        c.send('progress', p.progress);
+        return null;
+      }
+    }
+    return null;
   }
 
   // ---- parties -------------------------------------------------------------
@@ -677,6 +1111,9 @@ export class WorldRoom extends Room<WorldState> {
       online.delete(p.characterId);
       onlineChars.delete(p.characterId);
       camps.touch(p.characterId);
+      directory.delete(p.characterId);
+      const crew = crews.of(p.characterId);
+      if (crew) pushCrew(crew);
       this.leaveParty(client.sessionId, 'left');
       this.parties.decline(client.sessionId);
       this.pets.forget(client.sessionId);
@@ -707,7 +1144,8 @@ export class WorldRoom extends Room<WorldState> {
     // Riding a mount: faster (and flying mounts may leave the ground).
     const mount = this.pets.mountOf(e.id);
     if (mount?.fly) p.flyGrace = this.sim.time + 6;
-    const budget = characterData.runSpeed * (mount ? Math.max(mount.speed, mount.swim ?? 1) : 1) * mv.speedTolerance * dt + mv.slackMeters + p.allowance;
+    const ride = mount ? Math.max(mount.speed, mount.swim ?? 1) * mountScale(e.faction) : 1;
+    const budget = characterData.runSpeed * ride * mv.speedTolerance * dt + mv.slackMeters + p.allowance;
     const ground = groundAt(to.x, to.z);
     let reject = '';
     if (Math.abs(to.x) > HALF_WORLD || Math.abs(to.z) > HALF_WORLD) reject = 'edge of the world';
@@ -763,6 +1201,7 @@ export class WorldRoom extends Room<WorldState> {
     this.sim.update(dt);
     for (const b of this.brains) updateDummy(b, dt, this.sim, groundAt);
     for (const b of this.npcs) updateNpc(b, dt, this.sim, groundAt);
+    this.bands.update(dt);
     const now = Date.now();
     this.wild.now = this.now();
     this.wild.night = this.night();
@@ -780,7 +1219,7 @@ export class WorldRoom extends Room<WorldState> {
         p.deadT += dt;
         if (p.deadT > 3) {
           p.deadT = 0;
-          const sp = campRespawn(camps, p.characterId) ?? hubSpawn(e.faction);
+          const sp = campRespawn(camps, p.characterId, crews.of(p.characterId)?.id) ?? hubSpawn(e.faction);
           e.pos.set(sp.x, Math.max(groundAt(sp.x, sp.z), worldData.seaLevel), sp.z);
           p.last.copy(e.pos);
           this.sim.revive(e);
@@ -817,10 +1256,15 @@ export class WorldRoom extends Room<WorldState> {
         p.stillFrom.copy(p.entity.pos);
         for (const n of this.quests.tick(p, night)) this.applyQuestNews(p, n);
         if (this.parties.of(p.entity.id)) this.clientOf(p.entity.id)?.send('party', this.partyInfo(p.entity.id));
+        this.factionTick(p, now);
       }
+      // Who stands in the capture circles (the territory counts every shard's players).
+      reportPresence(this.roomId, [...this.players.values()].map((p) => ({ charId: p.characterId, entity: p.entity, crew: crews.of(p.characterId)?.id ?? '' })), groundAt, this.sim.time);
+      const terr = this.terrMsg();
       for (const c of this.clients) {
         const p = this.players.get(c.sessionId);
         if (p) this.syncStructs(c, p);
+        c.send('terr', terr);
       }
     }
     // Level-up events raised by grant() above.
@@ -968,5 +1412,7 @@ export class WorldRoom extends Room<WorldState> {
     st.wu = r(e.windup);
     st.pvp = e.pvp;
     st.fac = e.faction;
+    st.tag = e.tag;
+    st.inf = Math.min(65535, e.infamy);
   }
 }

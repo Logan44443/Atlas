@@ -26,7 +26,7 @@ export interface Faction {
   trim: string;
   emblem: string;
   identity: string;
-  perk: { type: string; value: number; text: string };
+  perk: { type: string; value: number; text: string; radius?: number; floor?: number; travelDiscount?: number };
   hub: Hub;
 }
 
@@ -54,6 +54,11 @@ export const NPC_CFG = factionData.npcs;
 
 export const factionById = (id: string | null | undefined): Faction | undefined => FACTIONS.find((f) => f.id === id);
 export const sideOf = (id: string | null | undefined): Side | null => factionById(id)?.side ?? null;
+/** A faction's perk value when its perk is of this type (0 otherwise). */
+export const perkOf = (faction: string | null | undefined, type: string): number => {
+  const p = factionById(faction)?.perk;
+  return p && p.type === type ? p.value : 0;
+};
 
 export type Zone =
   | { kind: 'safe'; name: string; faction: FactionId }

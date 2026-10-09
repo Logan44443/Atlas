@@ -7,6 +7,8 @@ import pg from 'pg';
 import type { ElementId } from '../../shared/combat';
 import type { FactionId } from '../../shared/factions';
 import type { Structure } from '../../shared/building';
+import { CREW, crewData, type Crew, type CrewRole } from '../../shared/crews';
+import type { PointSave } from '../../shared/territory';
 
 export interface Account {
   id: string;
@@ -36,6 +38,8 @@ export interface CharacterRow {
   milestones: string[];
   /** pets state (see shared/petsState.ts) */
   pets: unknown;
+  /** faction standing (see shared/standing.ts) */
+  standing: unknown;
   createdAt: string;
 }
 
@@ -50,6 +54,7 @@ export interface CharacterSave {
   inv?: Record<string, number>;
   milestones?: string[];
   pets?: unknown;
+  standing?: unknown;
 }
 
 export class StoreError extends Error {
@@ -77,10 +82,18 @@ export interface Store {
   loadStructures(): Promise<Structure[]>;
   saveStructures(list: Structure[]): Promise<void>;
   deleteStructures(ids: string[]): Promise<void>;
+  /** Crews (Phase 11): rows plus members (names/levels come from their characters). */
+  loadCrews(): Promise<Crew[]>;
+  saveCrews(list: Crew[]): Promise<void>;
+  deleteCrews(ids: string[]): Promise<void>;
+  /** Who holds each territory point. */
+  loadTerritory(): Promise<PointSave[]>;
+  saveTerritory(list: PointSave[]): Promise<void>;
   close(): Promise<void>;
 }
 
 const newToken = () => randomBytes(24).toString('base64url');
+const defaultCrewData = () => ({ xp: 0, bank: {}, coins: 0, raidStart: CREW.raid.defaultStart, raidChangedAt: 0, motd: '' });
 
 // ---- PostgreSQL ---------------------------------------------------------------
 
@@ -101,6 +114,7 @@ const toChar = (r: Row): CharacterRow => ({
   inv: (r.inv as Record<string, number>) ?? {},
   milestones: (r.milestones as string[]) ?? [],
   pets: r.pets ?? {},
+  standing: r.standing ?? {},
   createdAt: new Date(r.created_at as string).toISOString(),
 });
 const toAccount = (r: Row): Account => ({ id: r.id as string, username: r.username as string, guest: r.guest as boolean });
@@ -231,12 +245,13 @@ export class PgStore implements Store {
          level = COALESCE($5, level), xp = COALESCE($6, xp), faction_rank = COALESCE($7, faction_rank),
          mastery = COALESCE($8::jsonb, mastery), discovered = COALESCE($9::jsonb, discovered), arts = COALESCE($10::jsonb, arts),
          inv = COALESCE($11::jsonb, inv), milestones = COALESCE($12::jsonb, milestones), pets = COALESCE($13::jsonb, pets),
-         last_seen = now()
+         standing = COALESCE($14::jsonb, standing), last_seen = now()
        WHERE id = $1`,
       [
         id, s.pos?.[0] ?? null, s.pos?.[1] ?? null, s.pos?.[2] ?? null, s.level ?? null, s.xp ?? null, s.rank ?? null,
         s.mastery ? JSON.stringify(s.mastery) : null, s.discovered ? JSON.stringify(s.discovered) : null, s.arts ? JSON.stringify(s.arts) : null,
         s.inv ? JSON.stringify(s.inv) : null, s.milestones ? JSON.stringify(s.milestones) : null, s.pets ? JSON.stringify(s.pets) : null,
+        s.standing ? JSON.stringify(s.standing) : null,
       ],
     );
   }
@@ -248,18 +263,81 @@ export class PgStore implements Store {
 
   async saveStructures(list: Structure[]): Promise<void> {
     if (!list.length) return;
-    // One upsert per batch; the owner FK drops structures of deleted characters.
+    // One upsert per batch. Camp pieces belong to their character and crew base pieces to their crew,
+    // so the foreign keys drop camps of deleted characters and bases of disbanded crews.
     await this.pool.query(
-      `INSERT INTO structures (id, owner, data, updated_at)
-       SELECT x.id, x.owner::uuid, x.data, now() FROM jsonb_to_recordset($1::jsonb) AS x(id text, owner text, data jsonb)
-       WHERE EXISTS (SELECT 1 FROM characters c WHERE c.id = x.owner::uuid)
+      `INSERT INTO structures (id, owner, crew, data, updated_at)
+       SELECT x.id, CASE WHEN x.crew IS NULL THEN x.owner::uuid END, x.crew::uuid, x.data, now()
+       FROM jsonb_to_recordset($1::jsonb) AS x(id text, owner text, crew text, data jsonb)
+       WHERE (x.crew IS NULL AND EXISTS (SELECT 1 FROM characters c WHERE c.id = x.owner::uuid))
+          OR (x.crew IS NOT NULL AND EXISTS (SELECT 1 FROM crews w WHERE w.id = x.crew::uuid))
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-      [JSON.stringify(list.map((s) => ({ id: s.id, owner: s.owner, data: s })))],
+      [JSON.stringify(list.map((s) => ({ id: s.id, owner: s.owner, crew: s.crew || null, data: s })))],
     );
   }
 
   async deleteStructures(ids: string[]): Promise<void> {
     if (ids.length) await this.pool.query('DELETE FROM structures WHERE id = ANY($1::text[])', [ids]);
+  }
+
+  async loadCrews(): Promise<Crew[]> {
+    const crews = (await this.pool.query('SELECT * FROM crews')).rows;
+    const members = (
+      await this.pool.query('SELECT m.crew_id, m.role, m.joined_at, c.id, c.name, c.level, c.element FROM crew_members m JOIN characters c ON c.id = m.character_id')
+    ).rows;
+    return crews.map((r) => ({
+      ...defaultCrewData(), ...(r.data as Partial<Crew>), id: r.id, name: r.name, tag: r.tag, faction: r.faction, created: new Date(r.created_at).getTime(),
+      members: members
+        .filter((m) => m.crew_id === r.id)
+        .map((m) => ({ charId: m.id, name: m.name, role: m.role as CrewRole, joined: new Date(m.joined_at).getTime(), level: m.level, element: m.element })),
+    }));
+  }
+
+  async saveCrews(list: Crew[]): Promise<void> {
+    for (const c of list) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO crews (id, name, tag, faction, data, created_at) VALUES ($1, $2, $3, $4, $5, to_timestamp($6 / 1000.0))
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, tag = EXCLUDED.tag, data = EXCLUDED.data`,
+          [c.id, c.name, c.tag, c.faction, JSON.stringify(crewData(c)), c.created],
+        );
+        await client.query('DELETE FROM crew_members WHERE crew_id = $1', [c.id]);
+        await client.query(
+          `INSERT INTO crew_members (character_id, crew_id, role, joined_at)
+           SELECT x.id::uuid, $1, x.role, to_timestamp(x.joined / 1000.0) FROM jsonb_to_recordset($2::jsonb) AS x(id text, role text, joined bigint)
+           WHERE EXISTS (SELECT 1 FROM characters ch WHERE ch.id = x.id::uuid)
+           ON CONFLICT (character_id) DO UPDATE SET crew_id = EXCLUDED.crew_id, role = EXCLUDED.role`,
+          [c.id, JSON.stringify(c.members.map((m) => ({ id: m.charId, role: m.role, joined: m.joined })))],
+        );
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  async deleteCrews(ids: string[]): Promise<void> {
+    if (ids.length) await this.pool.query('DELETE FROM crews WHERE id = ANY($1::uuid[])', [ids]);
+  }
+
+  async loadTerritory(): Promise<PointSave[]> {
+    const r = await this.pool.query('SELECT * FROM territory');
+    return r.rows.map((x) => ({ id: x.id, owner: x.owner, crew: x.crew, heldSince: Number(x.held_since) }));
+  }
+
+  async saveTerritory(list: PointSave[]): Promise<void> {
+    if (!list.length) return;
+    await this.pool.query(
+      `INSERT INTO territory (id, owner, crew, held_since)
+       SELECT x.id, x.owner, x.crew, x.held FROM jsonb_to_recordset($1::jsonb) AS x(id text, owner text, crew text, held bigint)
+       ON CONFLICT (id) DO UPDATE SET owner = EXCLUDED.owner, crew = EXCLUDED.crew, held_since = EXCLUDED.held_since`,
+      [JSON.stringify(list.map((p) => ({ id: p.id, owner: p.owner, crew: p.crew, held: p.heldSince })))],
+    );
   }
 
   async close(): Promise<void> {
@@ -275,6 +353,8 @@ export class MemoryStore implements Store {
   private sessions = new Map<string, { accountId: string; expires: number }>();
   private chars = new Map<string, CharacterRow>();
   private structs = new Map<string, Structure>();
+  private crews = new Map<string, Crew>();
+  private terr: PointSave[] = [];
 
   private byName(username: string) {
     for (const a of this.accounts.values()) if (a.account.username.toLowerCase() === username.toLowerCase()) return a;
@@ -318,14 +398,15 @@ export class MemoryStore implements Store {
   async createCharacter(accountId: string, c: { name: string; element: ElementId; faction: FactionId }, maxSlots: number): Promise<CharacterRow> {
     if ((await this.listCharacters(accountId)).length >= maxSlots) throw new StoreError('slots_full', `All ${maxSlots} character slots are used`);
     for (const o of this.chars.values()) if (o.name.toLowerCase() === c.name.toLowerCase()) throw new StoreError('name_taken', 'That name is taken');
-    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], arts: {}, inv: {}, milestones: [], pets: {}, createdAt: new Date().toISOString() };
+    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], arts: {}, inv: {}, milestones: [], pets: {}, standing: {}, createdAt: new Date().toISOString() };
     this.chars.set(row.id, row);
     return row;
   }
   async deleteCharacter(accountId: string, id: string): Promise<boolean> {
     const c = this.chars.get(id);
     if (!c || c.accountId !== accountId) return false;
-    for (const st of this.structs.values()) if (st.owner === id) this.structs.delete(st.id);
+    for (const st of this.structs.values()) if (st.owner === id && !st.crew) this.structs.delete(st.id);
+    for (const cr of this.crews.values()) cr.members = cr.members.filter((m) => m.charId !== id);
     return this.chars.delete(id);
   }
   async getCharacter(id: string): Promise<CharacterRow | null> {
@@ -349,16 +430,35 @@ export class MemoryStore implements Store {
     if (s.inv) c.inv = { ...s.inv };
     if (s.milestones) c.milestones = [...s.milestones];
     if (s.pets) c.pets = JSON.parse(JSON.stringify(s.pets));
+    if (s.standing) c.standing = JSON.parse(JSON.stringify(s.standing));
   }
 
   async loadStructures(): Promise<Structure[]> {
     return [...this.structs.values()].map((s) => JSON.parse(JSON.stringify(s)));
   }
   async saveStructures(list: Structure[]): Promise<void> {
-    for (const s of list) if (this.chars.has(s.owner)) this.structs.set(s.id, JSON.parse(JSON.stringify(s)));
+    for (const s of list) if (s.crew ? this.crews.has(s.crew) : this.chars.has(s.owner)) this.structs.set(s.id, JSON.parse(JSON.stringify(s)));
   }
   async deleteStructures(ids: string[]): Promise<void> {
     for (const id of ids) this.structs.delete(id);
+  }
+  async loadCrews(): Promise<Crew[]> {
+    return [...this.crews.values()].map((c) => JSON.parse(JSON.stringify(c)));
+  }
+  async saveCrews(list: Crew[]): Promise<void> {
+    for (const c of list) this.crews.set(c.id, JSON.parse(JSON.stringify(c)));
+  }
+  async deleteCrews(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      this.crews.delete(id);
+      for (const st of this.structs.values()) if (st.crew === id) this.structs.delete(st.id);
+    }
+  }
+  async loadTerritory(): Promise<PointSave[]> {
+    return this.terr.map((p) => ({ ...p }));
+  }
+  async saveTerritory(list: PointSave[]): Promise<void> {
+    this.terr = list.map((p) => ({ ...p }));
   }
   async close(): Promise<void> {}
 }

@@ -39,8 +39,10 @@ export function ventTick(camps: Camps, sim: CombatSim): void {
   }
 }
 
-/** Where to come back after dying: beside your campfire if you have one. */
-export function campRespawn(camps: Camps, charId: string): { x: number; z: number } | null {
+/** Where to come back after dying: beside your campfire if you have one, else at your crew's hall. */
+export function campRespawn(camps: Camps, charId: string, crew?: string | null): { x: number; z: number } | null {
   const f = camps.campfireOf(charId);
-  return f ? { x: f.x + 2, z: f.z + 2 } : null;
+  if (f) return { x: f.x + 2, z: f.z + 2 };
+  const h = crew ? camps.hallOf(crew) : undefined;
+  return h ? { x: h.x + 5, z: h.z + 5 } : null;
 }
