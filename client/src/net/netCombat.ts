@@ -197,11 +197,22 @@ export class NetCombat implements CombatHost {
   ): Promise<NetCombat> {
     const client = new Client(url);
     const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('no shard server answered')), NET.connectTimeoutMs));
-    const room = (await Promise.race([shardId ? client.joinById<WorldStateView>(shardId, opts) : client.joinOrCreate<WorldStateView>(ROOM_NAME, opts), timeout])) as Room<WorldStateView>;
-    const welcome = await Promise.race([
-      new Promise<WelcomeMsg>((res) => room.onMessage('welcome', res)),
-      timeout,
-    ]);
+    const joining = shardId ? client.joinById<WorldStateView>(shardId, opts) : client.joinOrCreate<WorldStateView>(ROOM_NAME, opts);
+    let room: Room<WorldStateView>;
+    try {
+      room = await Promise.race([joining, timeout]);
+    } catch (err) {
+      // A join that lands after we gave up would keep the character "already in the world": leave it.
+      joining.then((r) => r.leave(), () => {});
+      throw err;
+    }
+    let welcome: WelcomeMsg;
+    try {
+      welcome = await Promise.race([new Promise<WelcomeMsg>((res) => room.onMessage('welcome', res)), timeout]);
+    } catch (err) {
+      void room.leave();
+      throw err;
+    }
     const net = new NetCombat(room, welcome, who.name, who.element, player);
     net.me.faction = who.faction;
     net.me.side = sideOf(who.faction) ?? '';
