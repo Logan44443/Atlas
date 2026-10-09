@@ -349,6 +349,7 @@ export class WorldMap {
   private warEl!: HTMLSpanElement;
   private zoomEl!: HTMLSpanElement;
   private posEl!: HTMLSpanElement;
+  private helpEl!: HTMLSpanElement;
   private base: BaseLayer | null = null;
   private pumpId = 0;
   private drawId = 0;
@@ -369,6 +370,8 @@ export class WorldMap {
   private tipHtml = '';
   /** Compute time of the base layer in ms once built (for the debug overlay / tests). */
   baseMs = 0;
+  /** Debug: when set (dev builds), right-click on the map teleports you there. */
+  onTeleport: ((x: number, z: number) => void) | null = null;
 
   constructor(parent: HTMLElement) {
     this.el.className = 'wmap hidden';
@@ -395,6 +398,7 @@ export class WorldMap {
     }
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.el.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.canvas.addEventListener('contextmenu', (e) => this.onRightClick(e));
     this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     this.canvas.addEventListener('pointermove', (e) => this.onMove(e));
     this.canvas.addEventListener('pointerup', (e) => this.onUp(e));
@@ -427,6 +431,7 @@ export class WorldMap {
     if (this.opened) return;
     this.opened = true;
     this.el.classList.remove('hidden');
+    this.helpEl.textContent = `Wheel: zoom · drag: pan · double-click: centre on you${this.onTeleport ? ' · right-click: teleport (dev)' : ''}`;
     if (document.pointerLockElement) document.exitPointerLock();
     if (this.state) {
       this.cx = this.state.me.x;
@@ -565,6 +570,15 @@ export class WorldMap {
     this.drag = null;
     this.body.classList.remove('dragging');
     this.showTip();
+  }
+
+  private onRightClick(e: MouseEvent): void {
+    if (!this.onTeleport) return;
+    const p = this.local(e);
+    const x = clamp(this.cx + (p.x - this.vw / 2) / this.scale, -HALF + 1, HALF - 1);
+    const z = clamp(this.cz + (p.y - this.vh / 2) / this.scale, -HALF + 1, HALF - 1);
+    this.close();
+    this.onTeleport(x, z);
   }
 
   private onWheel(e: WheelEvent): void {
@@ -967,7 +981,7 @@ export class WorldMap {
     }
     const help = document.createElement('span');
     help.className = 'wm-help';
-    help.textContent = 'Wheel: zoom · drag: pan · double-click: centre on you';
+    this.helpEl = help;
     const pos = document.createElement('span');
     pos.className = 'wm-pos';
     el.append(help, pos);

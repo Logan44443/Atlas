@@ -290,6 +290,13 @@ async function main() {
   // (The chat box before the map: both take Escape in the capture phase, and leaving the chat field comes first.)
   const chat = new ChatBox(() => host);
   const worldMap = new WorldMap(document.body);
+  // Debugging: right-click on the world map teleports you (dev builds; production shards refuse `tp` anyway).
+  if (import.meta.env.DEV) {
+    worldMap.onTeleport = (x, z) => {
+      setMount(null);
+      tp(x, z);
+    };
+  }
   // The Quartermaster opens the shop when you talk to them.
   const shop = new ShopPanel(() => host, () => updateHint());
   dialog.onOpen = (e) => {
