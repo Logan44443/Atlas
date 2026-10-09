@@ -83,7 +83,7 @@ URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?n
 In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag, `K` mastery tree,
 `I` invite the player in front of you, `Y`/`N` answer an invite, `B` camp panel (bag/build/chest/forge), `C` channel
 (bend-craft), `G` also gathers at resource nodes and tames the wild animal in front of you (needs food), `O` pets panel,
-`H` ride your pet, `M` world map (`F4` is the chunk map), `U` faction & crew panel, `Enter` chat. Dev shards accept
+`H` ride your pet, `M` world map (`F4` is the chunk map; in dev builds right-click on the map teleports you there), `U` faction & crew panel, `Enter` chat. Dev shards accept
 `dev:xp`, `dev:clock`, `dev:raid`, `dev:give`, `dev:clearCamp`, `dev:boss` (`{id, here, hp}`), `dev:bond` (force the
 Bond Trial roll), `dev:pet` (put a pet in your stable), `dev:war` (true/false/null: force the territory war),
 `dev:warRate` (capture speed x n), `dev:coins` and `dev:points` (rank points); `LocalCombat` and `NetCombat` have the
