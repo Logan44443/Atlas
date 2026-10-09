@@ -63,6 +63,7 @@ import { paletteOf } from './game/combat/vfx';
 import { WorldMap } from './ui/worldMap';
 import { ChatBox } from './ui/chatUi';
 import { ShopPanel } from './ui/shopUi';
+import { FactionPanel, CrewInvitePrompt, WarHud } from './ui/factionUi';
 import { TerritoryView } from './world/territoryView';
 import { mountScale } from '@shared/factionRules';
 import { orderTarget } from '@shared/standing';
@@ -294,6 +295,10 @@ async function main() {
   dialog.onOpen = (e) => {
     if (e.role === 'vendor') shop.open(e);
   };
+  // Faction & crew panel (U), crew invites (Y/N when no party invite waits), the war HUD.
+  const factionPanel = new FactionPanel(() => host, () => updateHint());
+  const crewPrompt = new CrewInvitePrompt(() => host);
+  const warHud = new WarHud();
   let lastCamp: { x: number; z: number } | null = null;
   function mapState() {
     const h = host;
@@ -600,7 +605,7 @@ async function main() {
   crosshair.className = 'crosshair hidden';
   document.body.appendChild(crosshair);
   function updateHint() {
-    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || petsUi.isOpen || worldMap.isOpen || shop.isOpen || freeCam);
+    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || petsUi.isOpen || worldMap.isOpen || shop.isOpen || factionPanel.isOpen || freeCam);
     crosshair.classList.toggle('hidden', !input.pointerLocked);
   }
   gr.renderer.domElement.addEventListener('click', () => {
@@ -616,7 +621,7 @@ async function main() {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
       abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal, artsPanel, spirit, build, structView, nodeView,
       creatures, marks, telegraphs, petsUi, trustUi, announcer, bossBar, obstacles: worldObstacles(), wildInfo: { speciesById, petDef, densNear, bossById },
-      territoryView, worldMap, chat, shop,
+      territoryView, worldMap, chat, shop, factionPanel, crewPrompt, warHud,
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -671,7 +676,7 @@ async function main() {
       if (freeCam && spirit.t <= 0) fly.update(dt);
       if (!me.dead) player.update(dt, tpc.yaw);
       syncMe();
-      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy && !petsUi.isOpen && !trustUi.active && !worldMap.isOpen && !shop.isOpen && !chat.typing) abilities.update(dt, me.blocking);
+      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy && !petsUi.isOpen && !trustUi.active && !worldMap.isOpen && !shop.isOpen && !factionPanel.isOpen && !chat.typing) abilities.update(dt, me.blocking);
       for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
       if (host instanceof NetCombat) {
         for (const c of host.corrections.splice(0)) {
@@ -693,6 +698,9 @@ async function main() {
       worldMap.update(mapState());
       chat.update(dt);
       shop.update(player.renderPos.x, player.renderPos.z);
+      if (controls.pressed('faction')) factionPanel.toggle();
+      factionPanel.update();
+      warHud.update(host, player.renderPos.x, player.renderPos.z);
       const plate = `${me.tag ? `[${me.tag}] ` : ''}${me.name}`;
       if (plate !== myPlate) nameplate.set((myPlate = plate));
       // Progression and parties.
@@ -713,9 +721,18 @@ async function main() {
       if (player.flying) (flightBar.firstElementChild as HTMLElement).style.width = `${Math.min(100, (player.flightLeft / flightTotal) * 100)}%`;
       mastery.update();
       if (controls.pressed('partyInvite') && !partyUi.inviteLookedAt(camera)) zoneHud.show(`Look at a player within ${PROG.party.inviteRange} m to invite them`, true);
-      if (partyUi.pendingInvite && controls.pressed('acceptInvite')) partyUi.answer(true);
-      if (partyUi.pendingInvite && controls.pressed('declineInvite')) partyUi.answer(false);
+      // Y/N answer the party invite first, then a crew invite.
+      const yes = controls.pressed('acceptInvite');
+      const no = controls.pressed('declineInvite');
+      if (partyUi.pendingInvite) {
+        if (yes) partyUi.answer(true);
+        if (no) partyUi.answer(false);
+      } else if (crewPrompt.pending) {
+        if (yes) crewPrompt.answer(true);
+        if (no) crewPrompt.answer(false);
+      }
       partyUi.update(dt, { accept: keyOf('acceptInvite'), decline: keyOf('declineInvite') });
+      crewPrompt.update(dt, { accept: keyOf('acceptInvite'), decline: keyOf('declineInvite') });
       blindFog.classList.toggle('on', me.statuses.has('blind'));
       zoneHud.pvp = me.pvp;
       zoneHud.update(dt, player.renderPos.x, player.renderPos.z);
