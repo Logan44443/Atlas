@@ -255,6 +255,7 @@ const hour = (new Date().getUTCHours() + 6) % 24;
 await crewAction(A, { a: 'raid', hour });
 await until(A, (h) => window.__fw.host.crew?.raidStart === h, hour, 20000).catch(() => {});
 ok((await A.page.evaluate(() => window.__fw.host.crew?.raidStart)) === hour, `the leader moves the raid window to ${hour}:00 UTC`);
+await until(A, () => window.__fw.__notes.some((n) => n.includes('Raid window moved')), null, 20000).catch(() => {});
 ok((await notes(A)).some((n) => n.includes('Raid window moved')), 'and is told so');
 
 // The faction panel (U) and the world map (M).
@@ -315,13 +316,15 @@ const offTerr = await O.page.evaluate(() => window.__fw.host.terr);
 const isles = hubOf('freeisles');
 const offTarget = POINTS.filter((pt) => sideOf(offTerr.points.find((s) => s.id === pt.id)?.owner) !== 'order')
   .sort((a, b) => Math.hypot(a.x - isles.x, a.z - isles.z) - Math.hypot(b.x - isles.x, b.z - isles.z))[0];
+// A war band holds every point: like A online, O needs levels to survive it.
 await O.page.evaluate(() => {
+  window.__fw.host.grant(60000, 'test');
   window.__fw.host.devWar(true);
-  window.__fw.host.devWarRate(30);
+  window.__fw.host.devWarRate(50);
 });
 await goTo(O, offTarget.x + 3, offTarget.z);
 await until(O, (id) => window.__fw.host.terr.points.find((s) => s.id === id)?.owner === 'freeisles', offTarget.id, 180000).catch(() => {});
-ok((await O.page.evaluate((id) => window.__fw.host.terr.points.find((s) => s.id === id)?.owner, offTarget.id)) === 'freeisles', `offline: Free Isles takes ${offTarget.name}`);
+ok((await O.page.evaluate((id) => window.__fw.host.terr.points.find((s) => s.id === id)?.owner, offTarget.id)) === 'freeisles', `offline: Free Isles takes ${offTarget.name}${await O.page.evaluate(() => (window.__fw.host.me.dead ? ' (O died)' : ''))}`);
 await shot(O, 'offline-capture');
 await O.page.evaluate(() => window.__fw.host.devWar(null));
 await goTo(O, isles.x + 4, isles.z + 4);
