@@ -1,0 +1,17 @@
+{
+  "_comment": "Crews (DESIGN section 9, Phase 11): guilds of up to maxMembers players of one faction. Founding needs found.minLevel, faction rank (standing.json unlocks) and found.coins. Crew XP: xpShare of every member's XP; levelXp[i] = crew XP for crew level i+1. The bank holds bank.base + bank.perLevel x (level - 1) items and is open within bank.range of the crew hall or inside your own faction's hub. Members withdraw if their role is at least `withdraw`.",
+  "maxMembers": 30,
+  "found": { "minLevel": 8, "coins": 300 },
+  "name": { "min": 3, "max": 20 },
+  "tag": { "min": 2, "max": 4 },
+  "inviteSeconds": 180,
+  "xpShare": 0.1,
+  "levelXp": [0, 3000, 8000, 16000, 28000, 45000, 70000, 100000, 140000, 200000],
+  "bank": { "base": 400, "perLevel": 150, "range": 8 },
+  "withdraw": "officer",
+  "_base": "A crew base is anchored by its crew hall, raised on a free plot (territory.json plots). Members build within base.radius of the hall with their own materials; a base holds base.pieces + base.piecesPerLevel x (level - 1) pieces. A base nobody from the crew visits for base.burnOfflineDays burns down.",
+  "base": { "radius": 36, "pieces": 60, "piecesPerLevel": 10, "burnOfflineDays": 7 },
+  "_raid": "The crew leader picks when the base's daily raid window starts (UTC hour, raid.hours long), at most once every raid.changeCooldownHours and not while it is open. Beating the crew hall down during a raid sacks the base once per window: the raider takes sack.share of each material in the bank (up to sack.max items in all), plus XP and rank points.",
+  "raid": { "hours": 3, "changeCooldownHours": 24, "defaultStart": 19 },
+  "sack": { "share": 0.2, "max": 200, "xpPerLevel": 50, "points": 40 }
+}

@@ -2,6 +2,7 @@
 // client, server, workers and the world build.
 import factionData from '../data/factions.json';
 import zoneData from '../data/zones.json';
+import territoryData from '../data/territory.json';
 import worldData from '../data/world.json';
 import type { TerrainConfig } from './terrain';
 
@@ -40,7 +41,14 @@ export interface ContestedZone {
 
 export const FACTIONS = factionData.factions as Faction[];
 export const SIDES = factionData.sides as Record<Side, { name: string; color: string }>;
+/** The three contested shrines. */
 export const CONTESTED = zoneData.contested as ContestedZone[];
+/** Territory outposts (Phase 11): contested zones like the shrines. */
+export const OUTPOSTS = territoryData.outposts as ContestedZone[];
+/** Every contested zone: shrines and outposts. */
+export const CONTESTED_ZONES: ContestedZone[] = [...CONTESTED, ...OUTPOSTS];
+/** Crew base plots: [x, z] centres (data/territory.json). */
+export const PLOTS = (territoryData.plots as Array<[number, number]>).map(([x, z], i) => ({ id: `plot${i + 1}`, x, z }));
 export const PVP = zoneData.pvp;
 export const NPC_CFG = factionData.npcs;
 
@@ -56,7 +64,7 @@ export function zoneAt(x: number, z: number): Zone {
   for (const f of FACTIONS) {
     if (Math.hypot(x - f.hub.x, z - f.hub.z) <= f.hub.safeRadius) return { kind: 'safe', name: f.hub.name, faction: f.id };
   }
-  for (const c of CONTESTED) {
+  for (const c of CONTESTED_ZONES) {
     if (Math.hypot(x - c.x, z - c.z) <= c.radius) return { kind: 'contested', name: c.name, id: c.id };
   }
   return { kind: 'wilds', name: 'Wilds' };
@@ -69,10 +77,11 @@ export interface Flat {
   blend: number;
 }
 
-/** Areas the terrain is levelled for: hub plazas and shrine platforms. */
+/** Areas the terrain is levelled for: hub plazas, shrine and outpost platforms, crew base plots. */
 export const FLATS: Flat[] = [
   ...FACTIONS.map((f) => ({ x: f.hub.x, z: f.hub.z, radius: f.hub.radius + 6, blend: 34 })),
-  ...CONTESTED.map((c) => ({ x: c.x, z: c.z, radius: c.flatRadius, blend: 24 })),
+  ...CONTESTED_ZONES.map((c) => ({ x: c.x, z: c.z, radius: c.flatRadius, blend: 24 })),
+  ...PLOTS.map((p) => ({ x: p.x, z: p.z, radius: territoryData.plotFlatRadius, blend: 20 })),
 ];
 
 /** world.json plus the flattened sites: what every TerrainSampler should be built from. */

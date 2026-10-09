@@ -6,7 +6,7 @@ import worldData from '../data/world.json';
 import matData from '../data/crafting/materials.json';
 import { hash2 } from './noise';
 import { TerrainSampler } from './terrain';
-import { FACTIONS, CONTESTED, terrainConfig } from './factions';
+import { FACTIONS, CONTESTED_ZONES, terrainConfig } from './factions';
 
 export type NodeType = 'timber' | 'boulder' | 'sand' | 'ore_node' | 'hot_spring' | 'ash_pile';
 export interface ResourceNode {
@@ -38,7 +38,7 @@ const terrain = () => (sampler ??= new TerrainSampler(terrainConfig()));
 /** Keep nodes off hub plazas/walls and shrine platforms. */
 function blocked(x: number, z: number): boolean {
   for (const f of FACTIONS) if (Math.hypot(x - f.hub.x, z - f.hub.z) < f.hub.radius + 6) return true;
-  for (const c of CONTESTED) if (Math.hypot(x - c.x, z - c.z) < 30) return true;
+  for (const c of CONTESTED_ZONES) if (Math.hypot(x - c.x, z - c.z) < 30) return true;
   return false;
 }
 

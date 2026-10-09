@@ -1,0 +1,40 @@
+{
+  "_comment": "Territory wars (DESIGN section 5, Phase 11). Points = the 3 contested shrines (zones.json) plus the outposts below; outposts are contested zones too (always-on PvP). Points only change hands during a war (wars: UTC start hour + minutes, every day). Capture: living players of one side inside captureRadius push the meter; strength = min(maxStrength, more players than the other side), a full capture by one player takes captureSeconds. The holder's own players refill it; a point the attackers drain to 0 turns neutral, then fills toward them. With nobody inside, a half-taken meter drifts back at decayScale. The faction with the most capturers takes it; their crew (if any) gets the income every incomeEveryMinutes.",
+  "wars": [
+    { "start": 2, "minutes": 45 },
+    { "start": 17, "minutes": 45 }
+  ],
+  "kinds": {
+    "shrine": { "captureRadius": 20, "captureSeconds": 60, "xpPerLevel": 60, "rankPoints": 60, "coins": 60, "income": { "glass": 2, "steam_core": 1, "ice_crystal": 1 }, "incomeCoins": 30 },
+    "outpost": { "captureRadius": 16, "captureSeconds": 40, "xpPerLevel": 40, "rankPoints": 40, "coins": 40, "income": { "wood": 6, "stone": 6, "ore": 3 }, "incomeCoins": 20 }
+  },
+  "_buffs": "Held shrines give the holding faction's members a bonus everywhere: dmg = outgoing bending damage, regen = chi regeneration, armor = damage taken reduced. Every held point also adds xpPerPoint XP for the holding faction.",
+  "buffs": {
+    "ember_shrine": { "type": "dmg", "value": 0.05, "text": "+5% bending damage" },
+    "tide_shrine": { "type": "regen", "value": 0.1, "text": "+10% chi regeneration" },
+    "stone_shrine": { "type": "armor", "value": 0.05, "text": "5% less damage taken" }
+  },
+  "xpPerPoint": 0.02,
+  "maxStrength": 3,
+  "decayScale": 0.25,
+  "incomeEveryMinutes": 10,
+  "heldAtWarEndPoints": 10,
+  "_warband": "Faction NPCs fight at every point during a war: `perSide` fighters for each side (the holder's own faction defends; attackers come from the other side's factions in turn). They attack players of the other side and don't count toward captures.",
+  "warband": { "perSide": 2, "level": 18, "health": 700, "patrolRadius": 14 },
+  "outposts": [
+    { "id": "westmarch", "name": "Westmarch Outpost", "x": -1410, "z": -92, "radius": 80, "flatRadius": 14 },
+    { "id": "reedwatch", "name": "Reedwatch Outpost", "x": -402, "z": -154, "radius": 80, "flatRadius": 14 },
+    { "id": "saltwind", "name": "Saltwind Outpost", "x": 584, "z": -604, "radius": 80, "flatRadius": 14 },
+    { "id": "eastreach", "name": "Eastreach Outpost", "x": 1642, "z": 144, "radius": 80, "flatRadius": 14 },
+    { "id": "cinder_ridge", "name": "Cinder Ridge Outpost", "x": -564, "z": 544, "radius": 80, "flatRadius": 14 },
+    { "id": "moonfall", "name": "Moonfall Outpost", "x": 692, "z": 744, "radius": 80, "flatRadius": 14 }
+  ],
+  "_plots": "Crew base plots: a crew claims a free plot by raising its crew hall within plotRadius of the plot centre. The ground is levelled within flatRadius.",
+  "plotRadius": 12,
+  "plotFlatRadius": 16,
+  "plots": [
+    [-1042, 463], [-982, 156], [-772, 370], [637, 23], [940, -322], [969, -43], [308, 667], [230, 312], [158, 664],
+    [-1525, -140], [-1245, 3], [-1378, 29], [-238, -198], [-402, -14], [-251, -38], [584, -729], [694, -494], [687, -739],
+    [1797, 144], [1701, 1], [1513, 90], [-394, 544], [-612, 429], [-680, 695], [791, 820], [835, 685], [569, 838]
+  ]
+}

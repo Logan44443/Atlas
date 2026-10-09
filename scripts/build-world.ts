@@ -9,6 +9,7 @@ import worldData from '../data/world.json' with { type: 'json' };
 import propsData from '../data/props.json' with { type: 'json' };
 import factionData from '../data/factions.json' with { type: 'json' };
 import zoneData from '../data/zones.json' with { type: 'json' };
+import territoryData from '../data/territory.json' with { type: 'json' };
 import { TerrainSampler } from '../shared/terrain';
 import { terrainConfig } from '../shared/factions';
 import { chunkProps } from '../shared/props';
@@ -19,7 +20,7 @@ const outDir = join(import.meta.dirname, '..', 'client', 'public', 'world');
 const chunkDir = join(outDir, 'chunks');
 const cfg = terrainConfig();
 const configHash = createHash('sha1')
-  .update(JSON.stringify(worldData) + JSON.stringify(propsData) + JSON.stringify(factionData.factions.map((f) => f.hub)) + JSON.stringify(zoneData.contested) + GENERATOR_VERSION)
+  .update(JSON.stringify(worldData) + JSON.stringify(propsData) + JSON.stringify(factionData.factions.map((f) => f.hub)) + JSON.stringify(zoneData.contested) + JSON.stringify([territoryData.outposts, territoryData.plots, territoryData.plotFlatRadius]) + GENERATOR_VERSION)
   .digest('hex')
   .slice(0, 12);
 
