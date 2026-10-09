@@ -34,10 +34,11 @@
     "inviteRange": 20
   },
   "discovery": {
-    "_comment": "First visit to a landmark (any faction hub or contested shrine).",
+    "_comment": "First visit to a landmark (any faction hub, contested shrine or territory outpost).",
     "radius": 60,
     "hub": 120,
-    "shrine": 250
+    "shrine": 250,
+    "outpost": 150
   },
   "respecGold": 0,
   "crit": { "multiplier": 1.6 }

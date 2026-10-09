@@ -6,6 +6,7 @@ import { TerrainSampler } from '../shared/terrain';
 import { terrainConfig } from '../shared/factions';
 import { Camps, type Structure } from '../shared/building';
 import type { Store } from './db/store';
+import { crews, flushCrews } from './crews';
 
 const sampler = new TerrainSampler(terrainConfig());
 export const camps = new Camps((x, z) => sampler.height(x, z));
@@ -30,11 +31,15 @@ export async function initCamps(s: Store): Promise<void> {
     }
   });
   setInterval(() => void flushCamps(), 5000).unref();
-  // Abandoned camps burn down (checked every minute).
+  // Abandoned camps and crew bases burn down (checked every minute).
   setInterval(() => {
     const now = Date.now();
-    for (const id of onlineChars) camps.touch(id, now);
-    const burnt = camps.burnAbandoned((id) => onlineChars.has(id), now);
+    for (const id of onlineChars) {
+      camps.touch(id, now);
+      const crew = crews.of(id);
+      if (crew) camps.touchCrew(crew.id, now);
+    }
+    const burnt = camps.burnAbandoned((s) => (s.crew ? !!crews.byId.get(s.crew)?.members.some((m) => onlineChars.has(m.charId)) : onlineChars.has(s.owner)), now);
     if (burnt.length) console.log(`[camps] ${burnt.length} pieces of abandoned camps burned down`);
   }, 60_000).unref();
   console.log(`[camps] ${camps.all.size} structures loaded (chunk size ${worldData.chunkSize} m)`);
@@ -42,6 +47,8 @@ export async function initCamps(s: Store): Promise<void> {
 
 export async function flushCamps(): Promise<void> {
   if (!store) return;
+  // Crew base pieces need their crew's row first.
+  await flushCrews();
   const save = [...dirty.values()];
   const del = [...deleted];
   dirty.clear();
@@ -54,6 +61,11 @@ export async function flushCamps(): Promise<void> {
     for (const s of save) dirty.set(s.id, s);
     for (const id of del) deleted.add(id);
   }
+}
+
+/** A crew disbanded: its base goes with it. */
+export function removeCrewBase(crew: string): void {
+  for (const s of camps.ofCrew(crew)) camps.delete(s.id);
 }
 
 /** A character was deleted: their camp goes with them. */

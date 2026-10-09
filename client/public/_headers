@@ -1,0 +1,26 @@
+# Cloudflare Pages response headers. Vite copies this file to dist/_headers.
+# Pages joins the values when several rules set the same header for a path, so
+# the Cache-Control rules below must not overlap (no catch-all /* rule).
+# Anything not listed keeps the Pages default (max-age=0, must-revalidate),
+# which is what index.html wants.
+# No Content-Type rules: Pages serves .wasm as application/wasm by itself, and
+# Rapier (rapier3d-compat) inlines its wasm in the JS bundle anyway.
+
+# Vite's bundles have a content hash in the file name.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# World chunks (.bin heights + .json props) are fetched as
+# /world/chunks/<cx>_<cz>.<ext>?v=<hash from manifest.json>, so a changed chunk
+# gets a new URL and a long max-age is safe. Not "immutable": the path itself
+# is reused by the next world version.
+/world/chunks/*
+  Cache-Control: public, max-age=31536000
+
+# The manifest names the current chunk hashes: always revalidate.
+/world/manifest.json
+  Cache-Control: no-cache
+
+# Service Worker script: always check for a new version.
+/sw.js
+  Cache-Control: no-cache

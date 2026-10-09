@@ -5,10 +5,11 @@ import progressionData from '../data/progression.json';
 import masteryData from '../data/mastery.json';
 import type { AbilityDef, ElementId, ElementKit, Slot } from './combat';
 import { SLOTS } from './combat';
-import { FACTIONS, CONTESTED, PVP, zoneAt } from './factions';
+import { FACTIONS, CONTESTED, OUTPOSTS, PVP, zoneAt } from './factions';
 import { newArtsState, type ArtsState } from './arts';
 import type { Inventory } from './building';
 import { newPetsState, type PetsState } from './petsState';
+import { newStanding, type Standing } from './standing';
 import type { SimEntity } from './sim/combatSim';
 
 export const PROG = progressionData;
@@ -36,10 +37,12 @@ export interface Progress {
   milestones: string[];
   /** pets, rare pet quests and Bond Trial luck (Phase 10) */
   pets: PetsState;
+  /** faction rank points, bounty/honour, coins and the current faction order (Phase 11) */
+  standing: Standing;
 }
 
 export function newProgress(p: Partial<Progress> = {}): Progress {
-  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, inv: {}, milestones: [], pets: newPetsState(), ...p };
+  return { level: 1, xp: 0, mastery: {}, discovered: [], arts: newArtsState(), rank: 1, inv: {}, milestones: [], pets: newPetsState(), standing: newStanding(), ...p };
 }
 
 /** Adds XP (levelling up as needed) and returns how many levels were gained. */
@@ -219,6 +222,7 @@ export interface Landmark {
 export const LANDMARKS: Landmark[] = [
   ...FACTIONS.map((f) => ({ id: `hub_${f.id}`, name: f.hub.name, x: f.hub.x, z: f.hub.z, xp: PROG.discovery.hub })),
   ...CONTESTED.map((c) => ({ id: c.id, name: c.name, x: c.x, z: c.z, xp: PROG.discovery.shrine })),
+  ...OUTPOSTS.map((c) => ({ id: c.id, name: c.name, x: c.x, z: c.z, xp: PROG.discovery.outpost })),
 ];
 
 export interface XpAward {

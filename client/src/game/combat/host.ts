@@ -1,13 +1,13 @@
 import * as THREE from 'three/webgpu';
 import type { Slot } from '@shared/combat';
 import { CombatSim, createEntity, setMods, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
-import { XpRules, addXp, computeMods, newProgress, sanitizeAlloc, type Progress, type XpPlayer } from '@shared/progression';
-import type { InviteMsg, PartyInfo } from '@shared/net';
+import { XpRules, addXp, computeMods, newProgress, pointsSpent, sanitizeAlloc, type Progress, type XpPlayer } from '@shared/progression';
+import type { ChatMsg, ChatSend, CrewAction, CrewInviteMsg, InviteMsg, PartyInfo, ShopAction, TerrMsg, V3 } from '@shared/net';
 import { spawnDummies, updateDummy, type DummyBrain } from '@shared/sim/dummies';
 import { spawnNpcs, spawnMasters, updateNpc, type NpcBrain } from '@shared/sim/npcs';
 import { QuestRules, sanitizeArts, equippedAbility, artById, ARTS, masterId, type QuestNews } from '@shared/arts';
 import characterData from '@data/character.json';
-import { Camps, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory } from '@shared/building';
+import { BUILD, Camps, giveItems, itemsText, moveItems, pieceById, sanitizeInv, type Builder, type Inventory } from '@shared/building';
 import { CraftRules, type Crafter } from '@shared/crafting';
 import { milestoneXp, shrineBonus } from '@shared/campRules';
 import { Wildlife, type WildNews } from '@shared/sim/wildlife';
@@ -16,6 +16,14 @@ import { Obstacles } from '@shared/props';
 import { TerrainSampler } from '@shared/terrain';
 import { terrainConfig } from '@shared/factions';
 import { worldDays, nightAt } from '@shared/clock';
+import { OrderRules, addPoints, dropRanks, payCoins, rankOf, respecCost, sanitizeStanding } from '@shared/standing';
+import {
+  SHOP, boonFor, bossRewards, buy, captureRewards, hatchEggs, heldRewards, incomeRewards, killRewards, pardon, sell, travel, travelSpots, xpScale,
+  type FactionNews,
+} from '@shared/factionRules';
+import { Territory, pointById, presenceAt, type PointSave, type TerrNews } from '@shared/territory';
+import { WarBands } from '@shared/sim/warbands';
+import type { CrewView } from '@shared/crews';
 
 /** Where combat rules run: in this tab (offline) or on the shard server (online). */
 export interface CombatHost {
@@ -75,6 +83,20 @@ export interface CombatHost {
   answerInvite(accept: boolean): void;
   leaveParty(): void;
   kick(entityId: string): void;
+
+  // Territory wars, faction standing, crews, chat and the Quartermaster (Phase 11).
+  /** the war and who holds each point (the authority's latest word) */
+  readonly terr: TerrMsg;
+  /** your crew (online only) and crew invites waiting for an answer */
+  readonly crew: CrewView | null;
+  readonly crewInvites: CrewInviteMsg[];
+  /** chat lines since the UI last drained them */
+  readonly chat: ChatMsg[];
+  /** moves the authority made (fast travel): put the character here */
+  readonly warps: V3[];
+  sendChat(m: ChatSend): void;
+  crewAction(a: CrewAction): void;
+  shop(a: ShopAction): void;
 }
 
 export interface QuestLine {
@@ -90,6 +112,10 @@ export function applyArtsToEntity(e: SimEntity, p: Progress): void {
 }
 
 const CAMPS_KEY = 'fw.camps';
+
+/** A pet stable of your side within reach keeps your pets fed. */
+const stableNear = (camps: Camps, e: SimEntity) => !!camps.effectNear(e.pos.x, e.pos.z, 'stable', BUILD.stableRadius, (s) => s.side === e.side);
+const TERR_KEY = 'fw.territory';
 
 /** Tree trunks and boulders, shared by every offline host in this tab. */
 let obstacles: Obstacles | null = null;
@@ -135,11 +161,20 @@ export class LocalCombat implements CombatHost {
   readonly pets: PetRules;
   readonly trustGames: TrustGame[] = [];
   readonly announcements: string[] = [];
+  readonly territory: Territory;
+  readonly bands: WarBands;
+  private orders = new OrderRules();
+  terr: TerrMsg;
+  readonly crew = null;
+  readonly crewInvites: CrewInviteMsg[] = [];
+  readonly chat: ChatMsg[] = [];
+  readonly warps: V3[] = [];
 
   constructor(name: string, element: SimEntity['element'], spawn: { x: number; z: number }, private groundAt: (x: number, z: number) => number, progress?: Partial<Progress>) {
     this.sim = new CombatSim(groundAt);
     this.me = createPlayerEntity('player', name, element);
-    this.progress = newProgress({ ...progress, mastery: {}, arts: sanitizeArts(element, progress?.arts) });
+    const standing = sanitizeStanding(progress?.standing);
+    this.progress = newProgress({ ...progress, mastery: {}, arts: sanitizeArts(element, progress?.arts), standing, rank: rankOf(standing.points) });
     if (element) this.progress.mastery = sanitizeAlloc(element, this.progress.level, progress?.mastery);
     applyArtsToEntity(this.me, this.progress);
     this.me.level = this.progress.level;
@@ -172,11 +207,27 @@ export class LocalCombat implements CombatHost {
         /* storage full or blocked */
       }
     });
+    // Territory wars run on the same schedule offline: you against the war bands.
+    let saved: PointSave[] = [];
+    try {
+      saved = JSON.parse(localStorage.getItem(TERR_KEY) ?? '[]');
+    } catch {
+      /* nothing saved */
+    }
+    this.territory = new Territory(Array.isArray(saved) ? saved : []);
+    this.bands = new WarBands(this.sim, groundAt);
+    if (this.territory.isOpen(Date.now())) this.bands.raise((id) => this.territory.states.get(id)?.owner ?? '');
+    this.terr = this.terrMsg();
+  }
+
+  private terrMsg(): TerrMsg {
+    const now = Date.now();
+    return { open: this.territory.isOpen(now), text: this.territory.text(now), points: this.territory.snapshot(), halls: [] };
   }
 
   private builder(): Builder {
     const e = this.me;
-    return { charId: this.charId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: this.progress.inv };
+    return { charId: this.charId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: this.progress.inv, rank: this.progress.rank, crew: null };
   }
   private crafter(): Crafter {
     return { entity: this.me, charId: this.charId, inv: this.progress.inv, arts: this.progress.arts.learned };
@@ -230,7 +281,19 @@ export class LocalCombat implements CombatHost {
   talkTo(npcId: string): void {
     const npc = this.sim.entities.get(npcId);
     if (npc?.role === 'beast') {
-      this.questLines.push({ art: '', npc: npcId, line: this.pets.keeperTalk(this.owner()) });
+      const egg = npc.faction === this.me.faction ? hatchEggs(this.owner(), this.pets, Date.now()) : null;
+      this.questLines.push({ art: '', npc: npcId, line: egg ?? this.pets.keeperTalk(this.owner()) });
+      return;
+    }
+    // Envoys hand out faction orders.
+    if (npc?.role === 'quest') {
+      const r = this.orders.talk(this.owner(), npc.faction);
+      this.questLines.push({ art: '', npc: npcId, line: r.line });
+      if (r.reward) {
+        this.grant(r.reward.xp, r.reward.reason);
+        this.notices.push({ text: `+${r.reward.coins} coins, +${r.reward.points} rank points` });
+      }
+      if (r.rankUp) this.notices.push({ text: `Faction rank ${this.progress.rank}!` });
       return;
     }
     const art = ARTS.find((a) => masterId(a.id) === npcId);
@@ -253,7 +316,7 @@ export class LocalCombat implements CombatHost {
 
   private questNews(n: QuestNews): void {
     if (n.notice) this.notices.push({ text: n.notice });
-    if (n.rankLoss) this.progress.rank = Math.max(1, this.progress.rank - n.rankLoss);
+    if (n.rankLoss) dropRanks(this.progress, n.rankLoss);
     if (n.learned) applyArtsToEntity(this.me, this.progress);
   }
 
@@ -264,8 +327,10 @@ export class LocalCombat implements CombatHost {
   }
 
   respec(): void {
+    const cost = respecCost(this.progress.level, pointsSpent(this.progress.mastery));
+    if (!payCoins(this.progress.standing, cost)) return void this.notices.push({ text: `A respec costs ${cost} coins; you have ${this.progress.standing.coins}`, warn: true });
     this.setMastery({});
-    this.notices.push({ text: 'Mastery points refunded' });
+    this.notices.push({ text: cost ? `Mastery points refunded (${cost} coins)` : 'Mastery points refunded' });
   }
 
   // ---- pets -------------------------------------------------------------------
@@ -339,6 +404,9 @@ export class LocalCombat implements CombatHost {
         case 'trial':
           this.notices.push({ text: this.pets.endTrial(this.owner(), n.pet, n.won, Date.now()), warn: !n.won });
           break;
+        case 'boss':
+          this.factionNews(bossRewards(this.owner(), n.tier, this.orders));
+          break;
       }
     }
   }
@@ -350,8 +418,107 @@ export class LocalCombat implements CombatHost {
   leaveParty(): void {}
   kick(): void {}
 
+  // ---- territory, standing, chat, shop (Phase 11) -------------------------------------
+
+  private factionNews(list: FactionNews[]): void {
+    for (const n of list) {
+      if (n.t === 'xp') this.grant(n.amount, n.reason);
+      else if (n.t === 'notice') this.notices.push({ text: n.text, warn: n.warn });
+    }
+  }
+
+  private terrNews(list: TerrNews[]): void {
+    let changed = false;
+    for (const n of list) {
+      switch (n.t) {
+        case 'war':
+          this.announcements.push(n.text);
+          if (n.open) this.bands.raise((id) => this.territory.states.get(id)?.owner ?? '');
+          else this.bands.disband();
+          break;
+        case 'captured':
+          changed = true;
+          this.announcements.push(n.text);
+          if (n.by.some((b) => b.entityId === this.me.id)) this.factionNews(captureRewards(this.owner(), pointById(n.point)!, this.orders));
+          break;
+        case 'lost':
+          changed = true;
+          this.notices.push({ text: n.text, warn: true });
+          break;
+        case 'income':
+          // Offline there are no crews: points your faction holds pay you.
+          if (n.faction === this.me.faction) this.factionNews(incomeRewards(this.owner(), pointById(n.point)!, n.items, n.coins));
+          break;
+        case 'held':
+          if (n.faction === this.me.faction) this.factionNews(heldRewards(this.owner(), n.points.length));
+          break;
+      }
+    }
+    if (!changed) return;
+    try {
+      localStorage.setItem(TERR_KEY, JSON.stringify(this.territory.save()));
+    } catch {
+      /* storage full or blocked */
+    }
+  }
+
+  /** Once a second: the war, buffs, visit orders, pet stables. */
+  private factionTick(now: number): void {
+    const me = this.me;
+    this.terrNews(this.territory.update(1, presenceAt([{ charId: this.charId, entity: me, crew: '' }], this.groundAt, this.sim.time), now));
+    this.terr = this.terrMsg();
+    me.boon = boonFor(me, this.territory);
+    const note = this.orders.tick(this.owner());
+    if (note) this.notices.push({ text: note });
+    if (stableNear(this.camps, me)) for (const x of this.progress.pets.owned) Object.assign(x, { fed: 100, fedAt: now });
+  }
+
+  sendChat(m: ChatSend): void {
+    const text = String(m.text ?? '').trim().slice(0, 200);
+    if (!text) return;
+    this.chat.push({ ch: m.ch, from: this.me.name, text, faction: this.me.faction, ...(m.ch === 'whisper' ? { to: m.to } : {}) });
+    if (m.ch !== 'say' && m.ch !== 'shard') this.chat.push({ ch: 'system', from: '', text: 'You are offline: nobody else can hear you' });
+  }
+
+  crewAction(): void {
+    this.notices.push({ text: 'Crews need a shard server (you are offline)', warn: true });
+  }
+
+  shop(a: ShopAction): void {
+    const npc = this.sim.entities.get(a.npc);
+    const p = this.owner();
+    if (!npc || npc.role !== 'vendor' || npc.side !== this.me.side || npc.pos.distanceTo(this.me.pos) > SHOP.vendorRange) {
+      return void this.notices.push({ text: 'Talk to a Quartermaster of your side', warn: true });
+    }
+    const now = Date.now();
+    if (a.a === 'buy') this.notices.push({ text: buy(p, a.item, a.n) });
+    else if (a.a === 'sell') this.notices.push({ text: sell(p, a.item, a.n) });
+    else if (a.a === 'pardon') this.notices.push({ text: pardon(p, now) });
+    else {
+      const camp = this.camps.campfireOf(this.charId);
+      const r = travel(p, travelSpots(this.me, camp ?? null, null).find((x) => x.id === a.dest), this.sim.time, now);
+      if (typeof r === 'string') return void this.notices.push({ text: r, warn: true });
+      this.warps.push([r.x, this.groundAt(r.x, r.z), r.z]);
+      this.notices.push({ text: r.text });
+    }
+  }
+
+  /** Tests: force the war open or shut, speed captures up, give coins or rank points. */
+  devWar(on: boolean | null): void {
+    this.territory.forceWar = on;
+  }
+  devWarRate(n: number): void {
+    this.territory.rateScale = n;
+  }
+  devCoins(n: number): void {
+    this.progress.standing.coins = Math.max(0, this.progress.standing.coins + n);
+  }
+  devPoints(n: number): void {
+    if (n > 0) addPoints(this.progress, n);
+  }
+
   private grant(amount: number, reason: string): void {
-    amount = Math.round(amount * shrineBonus(this.camps, this.me));
+    amount = Math.round(amount * shrineBonus(this.camps, this.me) * xpScale(this.me, this.territory));
     const levelUp = addXp(this.progress, amount);
     if (levelUp) {
       this.me.level = this.progress.level;
@@ -380,6 +547,7 @@ export class LocalCombat implements CombatHost {
     this.sim.update(dt);
     for (const b of this.brains) updateDummy(b, dt, this.sim, this.groundAt);
     for (const b of this.npcs) updateNpc(b, dt, this.sim, this.groundAt);
+    this.bands.update(dt);
     const now = Date.now();
     this.wild.now = now;
     this.wild.night = nightAt(worldDays(now));
@@ -393,7 +561,9 @@ export class LocalCombat implements CombatHost {
       const victim = this.sim.entities.get(ev.target);
       if (victim?.kind === 'creature') this.wildNews(this.wild.onDeath(ev.target, mine ? this.me.id : null, new Map([[this.me.id, owner]])));
       if (!victim || !mine) continue;
-      for (const a of this.xp.onKill(victim, this.self, new Map([[this.me.id, this.self]]), [this.me.id], this.sim.time)) this.grant(a.amount, a.reason);
+      const awards = this.xp.onKill(victim, this.self, new Map([[this.me.id, this.self]]), [this.me.id], this.sim.time);
+      for (const a of awards) this.grant(a.amount, a.reason);
+      this.factionNews(killRewards(victim, this.owner(), undefined, awards.some((a) => a.amount > 0), now, this.orders));
       for (const n of this.quests.onKill(this.questPlayer(), victim, this.me.ctx.night)) this.questNews(n);
     }
     this.wildNews(this.wild.update(dt, [owner]));
@@ -408,6 +578,7 @@ export class LocalCombat implements CombatHost {
       this.still = this.me.pos.distanceTo(this.stillFrom) < 0.6 ? this.still + 1 : 0;
       this.stillFrom.copy(this.me.pos);
       for (const n of this.quests.tick(this.questPlayer(), this.me.ctx.night)) this.questNews(n);
+      this.factionTick(now);
     }
     // No death penalty offline: get back up after a moment.
     if (this.me.dead && this.reviveT < 0) this.reviveT = 2;

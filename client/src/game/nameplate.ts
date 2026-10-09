@@ -23,7 +23,10 @@ export class Nameplate {
   set(name: string, color = '#ffffff'): void {
     const c = this.canvas.getContext('2d')!;
     c.clearRect(0, 0, 256, 64);
-    c.font = '600 30px ui-sans-serif, system-ui, sans-serif';
+    // Long plates ([TAG] Lv 40 Name ☠) shrink to fit the texture.
+    let px = 30;
+    do c.font = `600 ${px}px ui-sans-serif, system-ui, sans-serif`;
+    while (c.measureText(name).width > 244 && --px > 16);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.lineWidth = 6;

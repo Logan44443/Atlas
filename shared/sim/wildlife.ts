@@ -253,7 +253,9 @@ export type WildNews =
   | { t: 'announce'; text: string }
   | { t: 'bond'; id: string; boss: string; pet: string }
   | { t: 'rare'; id: string; boss: string; pet: string }
-  | { t: 'trial'; id: string; pet: string; won: boolean };
+  | { t: 'trial'; id: string; pet: string; won: boolean }
+  /** helped beat a boss (coins, faction orders) */
+  | { t: 'boss'; id: string; tier: string };
 
 /** A player as the wildlife sees them. */
 export interface WildPlayer {
@@ -809,6 +811,7 @@ export class Wildlife {
       if (xp > 0) out.push({ t: 'xp', id, amount: xp, reason: `defeated ${theName(def)}` });
       else out.push({ t: 'xp', id, amount: 0, reason: `no XP: ${theName(def)} is far below your level` });
       out.push({ t: 'loot', id, items: { ...def.loot } });
+      out.push({ t: 'boss', id, tier: def.tier });
       if (def.tier === 'mini' && def.pet) out.push({ t: 'rare', id, boss: def.id, pet: def.pet });
       if (def.tier === 'legendary' && def.pet && p.entity.element === def.element) {
         const pity = p.progress.pets.pity[def.id] ?? 0;

@@ -1,0 +1,12 @@
+# The shard server image only needs these (see Dockerfile). Everything else,
+# including client/, the generated world, node_modules and .git, stays out.
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!vendor/
+!data/
+!shared/
+!server/
+**/*.log
+**/.DS_Store

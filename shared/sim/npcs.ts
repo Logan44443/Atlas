@@ -22,6 +22,8 @@ export interface NpcBrain {
   vel: Vector3;
   /** players who hit this NPC recently -> seconds left */
   grudges: Map<string, number>;
+  /** war bands (Phase 11) also fight the other side's war bands */
+  brawl?: boolean;
 }
 
 const ELEMENTS: ElementId[] = ['fire', 'water', 'earth', 'air'];
@@ -169,7 +171,8 @@ function think(b: NpcBrain, sim: CombatSim): void {
     if (o.dead || o.kind === 'dummy' || !canHarm(e, o, sim.time)) continue;
     const d = o.pos.distanceTo(e.pos);
     // Patrols pick fights with the other side; guards only answer people who attack them.
-    const wants = b.grudges.has(o.id) || (b.role === 'fighter' && o.kind === 'player' && o.side !== e.side && d < NPC_CFG.aggroRange);
+    const rival = o.side !== e.side && d < NPC_CFG.aggroRange;
+    const wants = b.grudges.has(o.id) || (b.role === 'fighter' && rival && (o.kind === 'player' || (!!b.brawl && o.kind === 'npc' && o.role === 'fighter')));
     if (wants && d < best) {
       best = d;
       b.target = o.id;

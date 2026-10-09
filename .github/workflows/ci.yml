@@ -1,0 +1,42 @@
+# Typecheck, the browser-free rule checks, and a client build. No browser tests
+# here: those need a running dev server and shard (see CLAUDE.md "Run it").
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Rule checks
+        run: |
+          npx tsx scripts/progression-check.ts
+          npx tsx scripts/building-check.ts
+          npx tsx scripts/pets-check.ts
+          npx tsx scripts/territory-check.ts
+
+      # Not `npm run build`: that also generates the world (~65 MB), which the
+      # bundle does not import. Vite just copies client/public/world when it exists.
+      - name: Client build
+        run: npx vite build

@@ -8,8 +8,10 @@ export class NpcDialog {
   private hint = document.createElement('div');
   private box = document.createElement('div');
   private open: SimEntity | null = null;
-  /** Called when the player opens a conversation with a master or Beastkeeper (quests). */
+  /** Called when the player opens a conversation with a master, Beastkeeper or Envoy (quests, eggs, orders). */
   onTalk: ((e: SimEntity) => void) | null = null;
+  /** Called for every conversation (main opens the Quartermaster's shop from here). */
+  onOpen: ((e: SimEntity) => void) | null = null;
   /** Advice that fits the player (shared/advice.ts); falls back to the NPC's stock lines. */
   advise: ((e: SimEntity) => string) | null = null;
 
@@ -61,17 +63,18 @@ export class NpcDialog {
     const sub = [e.title, ROLE_LABEL[e.role ?? ''], f?.name].filter(Boolean).join(' · ');
     this.box.innerHTML = `<span class="who">${e.name}</span><span class="role">${sub}</span>
       <p>${lines[Math.floor(Math.random() * lines.length)]}</p><div class="close-hint">Walk away or press interact again to close</div>`;
-    if (master || e.role === 'beast') this.onTalk?.(e);
+    if (master || e.role === 'beast' || e.role === 'quest') this.onTalk?.(e);
     this.box.classList.remove('hidden');
+    this.onOpen?.(e);
   }
 
-  /** A master's or Beastkeeper's answer arrived (from the shard or the offline host). */
+  /** A master's, Beastkeeper's or Envoy's answer arrived (from the shard or the offline host). */
   say(npcId: string, line: string): void {
     if (this.open?.id !== npcId || !line) return;
     const p = this.box.querySelector('p');
     if (!p) return;
-    // Beastkeepers keep their advice and add the quest news.
-    if (this.open.role === 'beast') {
+    // Beastkeepers and Envoys keep their advice and add the quest or order news.
+    if (this.open.role === 'beast' || this.open.role === 'quest') {
       const q = document.createElement('p');
       q.className = 'quest-line';
       q.textContent = line;

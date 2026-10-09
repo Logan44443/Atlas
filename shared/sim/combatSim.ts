@@ -12,7 +12,7 @@ import {
   matchup, elementPower, canBend, levelPower,
   type AbilityDef, type CombatConfig, type ElementContext, type ElementId, type ElementKit, type Slot, type StatusDef, type StatusType,
 } from '../combat';
-import { zoneAt, PVP } from '../factions';
+import { zoneAt, perkOf, PVP } from '../factions';
 import { modKit, modAbility, NO_MODS, PROG, type Mods } from '../progression';
 import artsData from '../../data/arts.json';
 import comboData from '../../data/partyCombos.json';
@@ -141,7 +141,23 @@ export interface SimEntity {
   aura: number;
   /** Lightning charge time multiplier (Sun Dragon) */
   chargeScale: number;
+  // Faction standing and territory (Phase 11)
+  /** Outlaws: the bounty on their head (Sentinels hit them harder; Order players collect it) */
+  infamy: number;
+  /** bonuses from territory holdings and faction perks, set by the host once a second */
+  boon: Boon;
+  /** crew tag shown on the nameplate ('' = no crew) */
+  tag: string;
 }
+
+/** Territory buffs and faction perks: outgoing damage, chi regen, healing received, damage taken. */
+export interface Boon {
+  dmg: number;
+  regen: number;
+  heal: number;
+  armor: number;
+}
+export const NO_BOON: Boon = { dmg: 0, regen: 0, heal: 0, armor: 0 };
 
 /**
  * Who may damage whom. Zones: nobody fights inside a safe zone, opposite sides
@@ -297,6 +313,9 @@ export function createEntity(p: Partial<SimEntity> & Pick<SimEntity, 'id' | 'nam
     damagers: null,
     aura: 1,
     chargeScale: 1,
+    infamy: 0,
+    boon: NO_BOON,
+    tag: '',
     ...p,
   };
 }
@@ -447,7 +466,7 @@ export class CombatSim {
   perform(caster: SimEntity, def: AbilityDef, dirIn: Vector3, grabTarget: SimEntity | null = null, el: ElementId = caster.element ?? 'earth'): void {
     const slot = def.slot;
     caster.lastCombat = this.time;
-    const power = (caster.element ? elementPower(CFG, caster.element, caster.ctx) : 1) * levelPower(caster.level) * caster.aura;
+    const power = (caster.element ? elementPower(CFG, caster.element, caster.ctx) : 1) * levelPower(caster.level) * caster.aura * (1 + caster.boon.dmg);
     const dir = dirIn.clone().normalize();
     this.events.push({ t: 'cast', caster: caster.id, ability: def.id, slot, element: el, dir: arr(dir) });
 
@@ -720,6 +739,8 @@ export class CombatSim {
     if (crit) dmg *= PROG.crit.multiplier;
     // Anti-griefing: much higher-level players hit low-level ones softly.
     if (src.kind === 'player' && target.kind === 'player' && src.level - target.level >= PVP.lowLevelGap) dmg *= PVP.lowLevelDamageScale;
+    // Sentinel Corps: harder on Outlaws with a bounty.
+    if (target.infamy > 0) dmg *= 1 + perkOf(src.faction, 'bountyDamage');
     let result: 'hit' | 'blocked' = 'hit';
     if (target.blocking) {
       if (this.time - target.blockStart <= CFG.block.perfectWindow) {
@@ -734,7 +755,7 @@ export class CombatSim {
       result = 'blocked';
     }
     if (target.shield) dmg *= 1 - target.shield.reduction;
-    dmg *= 1 - target.mods.armor;
+    dmg *= 1 - Math.min(0.8, target.mods.armor + target.boon.armor);
     if (target.spiritUntil > this.time) dmg *= target.art?.vulnerable ?? 1.5;
     if (src.kind === 'player' && target.kind === 'player') src.lastPvp = target.lastPvp = this.time;
     dmg = Math.max(1, Math.round(dmg));
@@ -845,7 +866,7 @@ export class CombatSim {
     if (e.comboT <= 0) e.combo = 0;
     if (e.dead) return;
     const inCombat = this.time - e.lastCombat < CFG.chi.combatTimeout;
-    e.chi = Math.min(e.maxChi, e.chi + (inCombat ? CFG.chi.regenInCombat : CFG.chi.regenOutOfCombat) * (1 + e.mods.regen) * dt);
+    e.chi = Math.min(e.maxChi, e.chi + (inCombat ? CFG.chi.regenInCombat : CFG.chi.regenOutOfCombat) * (1 + e.mods.regen + e.boon.regen) * dt);
     for (const [k, s] of e.statuses) {
       s.remaining -= dt;
       if (s.type === 'burn') {
@@ -978,7 +999,7 @@ export class CombatSim {
           for (const t of this.entities.values()) {
             if (!canHelp(a.owner, t) || Math.hypot(t.pos.x - a.center.x, t.pos.z - a.center.z) > (ab.radius ?? 6) + t.radius) continue;
             for (const st of ab.cleanse ?? []) t.statuses.delete(st);
-            const amount = Math.min(t.maxHp - t.hp, Math.round(ab.heal * a.power * scale));
+            const amount = Math.min(t.maxHp - t.hp, Math.round(ab.heal * a.power * scale * (1 + t.boon.heal)));
             if (amount <= 0) continue;
             t.hp += amount;
             this.events.push({ t: 'heal', target: t.id, source: a.owner.id, amount });

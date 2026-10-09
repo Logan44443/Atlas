@@ -38,6 +38,9 @@ export const EntityState = schema(
     hgt: 'float32',
     /** a Bond Trial spirit: the only player who may fight it */
     tri: 'string',
+    /** crew tag and Outlaw bounty (nameplates) */
+    tag: 'string',
+    inf: 'uint16',
   },
   'EntityState',
 );

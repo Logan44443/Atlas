@@ -3,6 +3,9 @@ import netData from '../data/net.json';
 import type { Slot } from './combat';
 import type { Progress } from './progression';
 import type { SimEvent } from './sim/combatSim';
+import type { PointState } from './territory';
+import type { CrewRole } from './crews';
+import type { Inventory } from './building';
 
 export const NET = netData;
 export const ROOM_NAME = 'world';
@@ -97,3 +100,63 @@ export type EventsMsg = SimEvent[];
 export type ImpulseMsg = V3;
 
 export const STATUS_CODES = ['burn', 'slow', 'root', 'stagger'] as const;
+
+// ---- Phase 11: territory, chat, crews, shop ------------------------------------------
+
+/** Server -> client once a second: the territory war and who holds what. */
+export interface TerrMsg {
+  open: boolean;
+  text: string;
+  points: PointState[];
+  /** crew halls standing on base plots (world map) */
+  halls: Array<{ plot: string; tag: string; faction: string; x: number; z: number }>;
+}
+
+export type ChatChannel = 'say' | 'shard' | 'faction' | 'crew' | 'party' | 'whisper';
+
+/** Client -> server. `to` = a character name for whispers. */
+export interface ChatSend {
+  ch: ChatChannel;
+  text: string;
+  to?: string;
+}
+
+/** Server -> client. */
+export interface ChatMsg {
+  ch: ChatChannel | 'system';
+  from: string;
+  text: string;
+  faction?: string;
+  tag?: string;
+  /** whispers: who it went to */
+  to?: string;
+}
+
+/** Client -> server: everything you can do in the crew panel. */
+export type CrewAction =
+  | { a: 'create'; name: string; tag: string }
+  | { a: 'invite'; target: string }
+  | { a: 'accept' }
+  | { a: 'decline' }
+  | { a: 'leave' }
+  | { a: 'kick'; charId: string }
+  | { a: 'role'; charId: string; role: CrewRole }
+  | { a: 'raid'; hour: number }
+  | { a: 'motd'; text: string }
+  | { a: 'bank'; items: Inventory; put: boolean }
+  | { a: 'coins'; n: number; put: boolean };
+
+/** Server -> client: a crew wants you. */
+export interface CrewInviteMsg {
+  crew: string;
+  name: string;
+  tag: string;
+  from: string;
+  expires: number;
+}
+
+/** Client -> server: trade or travel with a Quartermaster (`npc`). */
+export type ShopAction = { npc: string } & ({ a: 'buy'; item: string; n: number } | { a: 'sell'; item: string; n: number } | { a: 'pardon' } | { a: 'travel'; dest: string });
+
+/** Server -> client: fast travel (or any server-side move): put the character here. */
+export type WarpMsg = V3;

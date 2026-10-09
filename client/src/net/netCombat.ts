@@ -2,7 +2,11 @@ import * as THREE from 'three/webgpu';
 import { Client, type Room } from 'colyseus.js';
 import type { ElementId, Slot, StatusType } from '@shared/combat';
 import { createEntity, setMods, type SimEntity, type SimEvent } from '@shared/sim/combatSim';
-import { NET, ROOM_NAME, type CorrectMsg, type InviteMsg, type JoinOptions, type MoveMsg, type PartyInfo, type V3, type WelcomeMsg, type XpMsg } from '@shared/net';
+import {
+  NET, ROOM_NAME, type ChatMsg, type ChatSend, type CorrectMsg, type CrewAction, type CrewInviteMsg, type InviteMsg, type JoinOptions, type MoveMsg, type PartyInfo,
+  type ShopAction, type TerrMsg, type V3, type WelcomeMsg, type XpMsg,
+} from '@shared/net';
+import type { CrewView } from '@shared/crews';
 import { computeMods, newProgress, type Progress } from '@shared/progression';
 import { applyArtsToEntity, createPlayerEntity, PLAYER_SHAPE, type CombatHost, type QuestLine, type XpGain } from '../game/combat/host';
 import { sideOf } from '@shared/factions';
@@ -41,6 +45,8 @@ interface EntityStateView {
   rad: number;
   hgt: number;
   tri: string;
+  tag: string;
+  inf: number;
 }
 
 interface WorldStateView {
@@ -61,9 +67,12 @@ interface Remote {
   samples: Sample[];
 }
 
+/** `?server=` first, then the build's VITE_SERVER_URL (production, see docs/DEPLOY.md), else this host on NET.port. */
 export function defaultServerUrl(): string {
   const q = new URLSearchParams(location.search).get('server');
   if (q) return q;
+  const built = import.meta.env.VITE_SERVER_URL;
+  if (built) return built.replace(/\/+$/, '');
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.hostname || 'localhost'}:${NET.port}`;
 }
@@ -114,6 +123,11 @@ export class NetCombat implements CombatHost {
   readonly charId: string;
   readonly trustGames: TrustGame[] = [];
   readonly announcements: string[] = [];
+  terr: TerrMsg = { open: false, text: '', points: [], halls: [] };
+  crew: CrewView | null = null;
+  readonly crewInvites: CrewInviteMsg[] = [];
+  readonly chat: ChatMsg[] = [];
+  readonly warps: V3[] = [];
 
   private constructor(
     readonly room: Room<WorldStateView>,
@@ -146,6 +160,14 @@ export class NetCombat implements CombatHost {
     room.onMessage('quest', (m: QuestLine) => this.questLines.push(m));
     room.onMessage('trust', (m: TrustGame) => this.trustGames.push(m));
     room.onMessage('announce', (text: string) => this.announcements.push(String(text)));
+    room.onMessage('terr', (m: TerrMsg) => (this.terr = m));
+    room.onMessage('crew', (v: CrewView | null) => {
+      this.crew = v;
+      this.me.tag = v?.tag ?? '';
+    });
+    room.onMessage('crewInvite', (m: CrewInviteMsg) => this.crewInvites.push(m));
+    room.onMessage('chat', (m: ChatMsg) => this.chat.push(m));
+    room.onMessage('warp', (v: V3) => this.warps.push(v));
     room.onMessage('structs', (list: Structure[]) => {
       for (const st of list) this.camps.upsert(st);
     });
@@ -175,11 +197,22 @@ export class NetCombat implements CombatHost {
   ): Promise<NetCombat> {
     const client = new Client(url);
     const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('no shard server answered')), NET.connectTimeoutMs));
-    const room = (await Promise.race([shardId ? client.joinById<WorldStateView>(shardId, opts) : client.joinOrCreate<WorldStateView>(ROOM_NAME, opts), timeout])) as Room<WorldStateView>;
-    const welcome = await Promise.race([
-      new Promise<WelcomeMsg>((res) => room.onMessage('welcome', res)),
-      timeout,
-    ]);
+    const joining = shardId ? client.joinById<WorldStateView>(shardId, opts) : client.joinOrCreate<WorldStateView>(ROOM_NAME, opts);
+    let room: Room<WorldStateView>;
+    try {
+      room = await Promise.race([joining, timeout]);
+    } catch (err) {
+      // A join that lands after we gave up would keep the character "already in the world": leave it.
+      joining.then((r) => r.leave(), () => {});
+      throw err;
+    }
+    let welcome: WelcomeMsg;
+    try {
+      welcome = await Promise.race([new Promise<WelcomeMsg>((res) => room.onMessage('welcome', res)), timeout]);
+    } catch (err) {
+      void room.leave();
+      throw err;
+    }
     const net = new NetCombat(room, welcome, who.name, who.element, player);
     net.me.faction = who.faction;
     net.me.side = sideOf(who.faction) ?? '';
@@ -281,6 +314,29 @@ export class NetCombat implements CombatHost {
   talkTo(npcId: string): void {
     if (!this.closed) this.room.send('quest:talk', npcId);
   }
+
+  sendChat(m: ChatSend): void {
+    if (!this.closed) this.room.send('chat', m);
+  }
+  crewAction(a: CrewAction): void {
+    if (!this.closed) this.room.send('crew', a);
+  }
+  shop(a: ShopAction): void {
+    if (!this.closed) this.room.send('shop', a);
+  }
+  /** Dev shards only: open/shut the war, speed up capture, hand out coins and standing points. */
+  devWar(on: boolean | null): void {
+    if (!this.closed) this.room.send('dev:war', on);
+  }
+  devWarRate(n: number): void {
+    if (!this.closed) this.room.send('dev:warRate', n);
+  }
+  devCoins(n: number): void {
+    if (!this.closed) this.room.send('dev:coins', n);
+  }
+  devPoints(n: number): void {
+    if (!this.closed) this.room.send('dev:points', n);
+  }
   equipArt(id: string | null): void {
     if (!this.closed) this.room.send('art:equip', id);
   }
@@ -378,6 +434,8 @@ export class NetCombat implements CombatHost {
     e.pvp = st.pvp;
     e.faction = st.fac;
     e.side = sideOf(st.fac) ?? '';
+    e.tag = st.tag ?? '';
+    e.infamy = st.inf ?? 0;
     e.shield = st.sh ? (e.shield ?? { ...SHIELD_STUB }) : null;
     const want = st.st ? (st.st.split(',') as StatusType[]) : [];
     for (const k of [...e.statuses.keys()]) if (!want.includes(k)) e.statuses.delete(k);

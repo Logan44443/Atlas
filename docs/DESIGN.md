@@ -81,6 +81,27 @@ trainers, quest givers, patrolling guards and fighters), a color and emblem, and
 - Same side = allies. You can party, share XP, and enter allied bases. Opposite side = enemies in contested zones.
 - Faction rank (1–10) rises with faction quests and PvP wins, and unlocks gear, base pieces and pet eggs.
 - Infamy/Honor: Outlaws gain a bounty from PvP kills; Order players earn a bonus for collecting bounties.
+- **As built (Phase 11)**, numbers in `data/standing.json`, `data/factions.json` and `data/shop.json`:
+  - **Rank 1-10** comes from rank points (100, 250, 500 ... 5000): faction orders, captures, holding points when a
+    war ends, PvP kills that give XP (15), enemy faction NPCs (3) and collected bounties (10% of the bounty). Titles
+    run Recruit to Legend. Rank 2 founds a crew, 3 unlocks the faction banner, pet stable and workshop, 4 a common
+    pet egg, 5 the metal gate, 6 spirit-warded walls and gates, 7 and 10 rare pet eggs. Eggs hatch at your own
+    faction's Beastkeeper. Bloodbending outside the Hollow Moon still costs whole ranks.
+  - **Envoy orders**: your faction's Envoy hands out one order at a time (hunt creatures, defeat rival patrols or
+    players, visit a territory point, take part in a capture, deliver materials, help beat a boss). Hand it in for
+    rank points, coins and XP; the next one follows.
+  - **Bounties**: an Outlaw who wins a PvP fight that gives XP gets +50 bounty (max 1000), which wears off at 60 an
+    hour of real time and shows as a skull on their nameplate. An Order player who defeats them collects it as
+    coins, honour, XP and rank points.
+  - **Coins** drop from creatures, rival faction NPCs and bosses, and come from orders and captures. They pay for
+    mastery respecs from level 10, crew founding, the Quartermaster and fast travel.
+  - **Quartermaster** (hub vendor): sells basic materials, buys anything back at 40%. Red Fang members also see the
+    black market (refined materials) and can buy a bounty pardon. Fast travel from a hub to the other hubs of your
+    side, your camp or your crew hall, priced by distance, not right after a fight and not with a bounty above 300.
+  - **Perks**: Sentinel +10% damage to bountied targets; Lantern +15% healing and chi regeneration within 90 m of a
+    shrine; Free Isles +20% mount speed and half-price fast travel; Red Fang +10% PvP XP and the black market; Ash
+    raids camps and bases outside their window at 35% damage, down to half health; Hollow Moon learns Bloodbending
+    freely.
 
 ## 5. Zones and PvP rules
 
@@ -98,6 +119,20 @@ trainers, quest givers, patrolling guards and fighters), a color and emblem, and
   `data/factions.json`, the three contested shrines (Ember, Tide, Stone) and all PvP numbers in `data/zones.json`.
   Each hub has 7 NPC members (vendor, trainer, envoy, two gate guards, two patrols); patrols attack players of the
   other side nearby, guards only fight back. Dummies and NPCs never fight each other.
+- **Territory wars as built (Phase 11)**, `data/territory.json`:
+  - Nine points: the three shrines plus six outposts (palisade, watchtower, flag), all contested zones. In a new world
+    each outpost belongs to the faction whose hub is nearest; shrines belong to nobody.
+  - Wars run twice a day (02:00 and 17:00 UTC, 45 minutes each). Only then do points change hands. Living players
+    of one side inside a point's capture circle push its meter (more players push faster, up to 3x); equal numbers
+    hold it still. Attackers drain the holder to neutral, then fill it for their side; the faction with the most
+    capturers takes it, and their crew (if any) collects its income.
+  - Holding a point gives every member of the faction +2% XP; each shrine adds a buff (Ember +5% bending damage,
+    Tide +10% chi regeneration, Stone 5% less damage taken). Every 10 minutes each held point pays materials and
+    coins to the crew that took it (crew bank), or straight to the faction's players online when no crew did.
+    Capturers get XP, coins and rank points; at the end of a war every member of a holding faction gets rank
+    points per point held.
+  - During a war, faction NPC war bands (2 per side at every point) fight each other and enemy players.
+  - One territory state for the whole server (all shards), saved in PostgreSQL; offline play keeps its own.
 
 ## 6. Bending combat
 
@@ -220,6 +255,15 @@ it meaning.
   combo needs two different members' elements on one target within 2.5 s, then that target is immune for 6 s.
 - **Crews** (guilds) of up to 30 players, within one faction. They share a base, a bank and a crew rank.
 - Faction NPCs fight alongside you in territory wars, and you can hire 1 NPC companion.
+- **Crews as built (Phase 11)**, `data/crews.json`, online only: found one at level 8 and faction rank 2 for 300
+  coins (name 3-20 characters, tag 2-4 letters shown on nameplates). Roles leader / officer / member: officers
+  invite, kick members and write the message of the day; the leader promotes, demotes and sets the raid window.
+  The leader's crown passes to the senior officer when they leave; the last one out disbands it. Crew XP is 10% of
+  members' XP and raises the crew level (1-10), which grows the bank (400 + 150 per level) and the base. The bank
+  (materials and coins) opens at the crew hall or in your faction hub; officers withdraw. Faction war bands are
+  built; the hired NPC companion is not.
+- **Chat (Phase 11)**: Enter opens the chat box. `/s` nearby (40 m), `/g` the whole shard, `/f` your faction
+  (every shard), `/c` crew, `/p` party, `/w name` whisper, `/r` reply. Rate-limited on the server.
 
 ## 10. Building: camps and bases
 
@@ -259,6 +303,16 @@ Phase 11. Until then every character's camp is their base:
 - XP milestones: first camp (100), a 10-piece camp (150), first metal wall (200).
 - Online, the server keeps one structure registry for all shards (PostgreSQL `structures` table); offline camps
   are saved in the browser.
+
+**Crew bases as built (Phase 11)**: 27 base plots across the Wilds near the outposts (`data/territory.json`,
+marked on the world map). An officer raises the **crew hall** (the base core, 6000 hp) on a free plot; it snaps to
+the plot's centre. Members then build within 36 m of the hall with their own materials, without a campfire: 60
+pieces plus 10 per crew level, plus 10 per workshop (up to 2). The hall is a respawn point, its chest-like pieces are
+shared by the crew, and nobody may start a camp next to a base. New pieces: crew hall, faction banner, pet stable
+(keeps your pets fed nearby), workshop, metal gate, spirit-warded wall and gate (they shrug off 30% of damage).
+The crew leader picks the base's daily 3-hour raid window (at most once a day, not while it is open). Beating the
+hall down to 1 hp during the window **sacks** the base once: the raider carries off 20% of each material in the
+crew bank (up to 200 items) plus XP and rank points. A base nobody from the crew visits for 7 days burns down.
 
 ## 10a. Bending crafting (element combos)
 
@@ -378,7 +432,7 @@ Pet data goes in `data/pets/*.json`.
 8. **Special Arts**: master NPCs and quests, then implement the arts one at a time.
 9. **Building**: camps, then bending crafting (element combo recipes, section 10a), then crew bases, raid windows. *(Done, except crew bases and crew-set raid windows, which move to Phase 11 with crews.)*
 10. **Pets**: common taming, then rare, then legendary world bosses and the Bond Trial. *(Done, together with wildlife, world bosses, solid trees/rocks, bending marks and NPC advice.)*
-11. **Territory wars, crews, polish, deployment**: CDN, servers, monitoring.
+11. **Territory wars, crews, polish, deployment**: CDN, servers, monitoring. *(Done: territory wars, faction rank and orders, bounties, perks, coins and the Quartermaster, crews with banks and bases, chat, the world map. Deployment is prepared (Dockerfile, Fly.io and Cloudflare Pages config, metrics, CI, `docs/DEPLOY.md`) but nothing is deployed until the owner picks the accounts.)*
 
 ## 13. How we work
 

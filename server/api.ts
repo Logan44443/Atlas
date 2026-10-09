@@ -14,6 +14,7 @@ import { validateName, validatePassword, validateUsername } from '../shared/name
 import { FACTIONS, type FactionId } from '../shared/factions';
 import type { ElementId } from '../shared/combat';
 import { removeOwner } from './camps';
+import { leaveCrew } from './crews';
 import { StoreError, type Account, type Store } from './db/store';
 
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -69,6 +70,18 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 const bearer = (req: IncomingMessage) => /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? null;
 
+/**
+ * Who is asking, for the rate limits. Behind a proxy (Fly) the socket is the
+ * proxy, so CLIENT_IP_HEADER names the header that carries the real address;
+ * it is only trusted when set, since anyone can send that header directly.
+ */
+function clientIp(req: IncomingMessage): string {
+  const h = process.env.CLIENT_IP_HEADER;
+  const v = h ? req.headers[h.toLowerCase()] : undefined;
+  const fromProxy = (Array.isArray(v) ? v[0] : v)?.split(',')[0].trim();
+  return fromProxy || req.socket.remoteAddress || '?';
+}
+
 export function createApi(store: Store) {
   async function requireAccount(req: IncomingMessage): Promise<{ account: Account; token: string }> {
     const token = bearer(req);
@@ -82,7 +95,7 @@ export function createApi(store: Store) {
   }
 
   async function route(req: IncomingMessage, url: URL): Promise<unknown> {
-    const ip = req.socket.remoteAddress ?? '?';
+    const ip = clientIp(req);
     const m = req.method;
     const p = url.pathname;
     if (m === 'POST' && p === '/api/guest') {
@@ -134,6 +147,7 @@ export function createApi(store: Store) {
       const { account } = await requireAccount(req);
       if (!(await store.deleteCharacter(account.id, del[1]))) throw new HttpError(404, 'No such character');
       removeOwner(del[1]);
+      leaveCrew(del[1]);
       return { ok: true };
     }
     throw new HttpError(404, 'Not found');

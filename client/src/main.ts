@@ -60,6 +60,14 @@ import { adviceFor } from '@shared/advice';
 import { petDef } from '@shared/pets';
 import { speciesById, densNear, bossById } from '@shared/sim/wildlife';
 import { paletteOf } from './game/combat/vfx';
+import { WorldMap } from './ui/worldMap';
+import { ChatBox } from './ui/chatUi';
+import { ShopPanel } from './ui/shopUi';
+import { FactionPanel, CrewInvitePrompt, WarHud } from './ui/factionUi';
+import { TerritoryView } from './world/territoryView';
+import { mountScale } from '@shared/factionRules';
+import { orderTarget } from '@shared/standing';
+import { questTarget } from '@shared/arts';
 
 const HELP = `Click to capture mouse, Esc for settings
 WASD move, Shift sprint, Space jump, V dodge
@@ -69,7 +77,8 @@ T special art  J arts & quests  K mastery
 B camp & bag  C channel (bend-craft)
 O pets  H ride your pet  G tame (with food)
 I invite to party  G talk/gather  P PvP flag
-F2 free camera  F3 overlay  F4/M chunk map`;
+M world map  U faction & crew  Enter chat
+F2 free camera  F3 overlay  F4 chunk map`;
 
 const TAME_PALETTE = paletteOf('#9dffb0', true);
 
@@ -185,6 +194,7 @@ async function main() {
     level: character.level, xp: character.xp ?? 0, mastery: character.mastery ?? {}, discovered: character.discovered ?? [],
     arts: character.arts as Progress['arts'] | undefined, rank: character.rank ?? 1,
     inv: sanitizeInv(character.inv), milestones: character.milestones ?? [], pets: character.pets as Progress['pets'] | undefined,
+    standing: character.standing as Progress['standing'] | undefined,
   } as Partial<Progress>;
   const makeLocal = (at: THREE.Vector3, progress: Partial<Progress> = savedProgress) => {
     const lc = new LocalCombat(who.name, who.element, spawn, groundAt, progress);
@@ -274,6 +284,41 @@ async function main() {
   trustUi.onDone = (ok) => host.trust(ok);
   const announcer = new Announcer();
   const bossBar = new BossBar();
+  // Territory wars (Phase 11): outposts and flags in the world, and the world map (M).
+  const territoryView = new TerritoryView((x, z) => sampler.height(x, z), physics);
+  scene.add(territoryView.group);
+  // (The chat box before the map: both take Escape in the capture phase, and leaving the chat field comes first.)
+  const chat = new ChatBox(() => host);
+  const worldMap = new WorldMap(document.body);
+  // The Quartermaster opens the shop when you talk to them.
+  const shop = new ShopPanel(() => host, () => updateHint());
+  dialog.onOpen = (e) => {
+    if (e.role === 'vendor') shop.open(e);
+  };
+  // Faction & crew panel (U), crew invites (Y/N when no party invite waits), the war HUD.
+  const factionPanel = new FactionPanel(() => host, () => updateHint());
+  const crewPrompt = new CrewInvitePrompt(() => host);
+  const warHud = new WarHud();
+  let lastCamp: { x: number; z: number } | null = null;
+  function mapState() {
+    const h = host;
+    const crew = h.crew;
+    const camp = h.camps.campfireOf(h.charId);
+    if (camp) lastCamp = { x: camp.x, z: camp.z };
+    const hall = crew ? h.terr.halls.find((x) => x.tag === crew.tag) : undefined;
+    const art = artById(artsPanel.tracked);
+    const quest = art ? questTarget(art, h.progress.arts) : null;
+    return {
+      me: { x: player.renderPos.x, z: player.renderPos.z, yaw: tpc.yaw },
+      party: (h.party?.members ?? []).filter((m) => m.id !== h.me.id).map((m) => ({ name: m.name, x: m.x, z: m.z })),
+      points: h.terr.points,
+      takenPlots: h.terr.halls.map((x) => ({ id: x.plot, tag: x.tag, faction: x.faction })),
+      camp: lastCamp,
+      hall: hall && crew ? { x: hall.x, z: hall.z, name: `[${crew.tag}] ${crew.name}` } : null,
+      target: orderTarget(h.progress.standing.order) ?? (quest ? { x: quest.x, z: quest.z, name: quest.label } : null),
+      warText: h.terr.text,
+    };
+  }
   const tameHint = document.createElement('div');
   tameHint.className = 'interact-hint tame-hint hidden';
   document.body.appendChild(tameHint);
@@ -283,7 +328,9 @@ async function main() {
     adviceFor({ role: e.role ?? '', me: host.me, progress: host.progress, now: host instanceof NetCombat ? host.serverNow : Date.now(), night: dayNight.nightFactor, seed: adviceSeed++ });
   function setMount(petId: string | null) {
     const pet = petId ? host.entities.get(petId) : undefined;
-    player.mount = pet ? (petDef(pet.beast)?.mount ?? null) : null;
+    const m = pet ? petDef(pet.beast)?.mount : undefined;
+    // Free Isles League riders go faster (faction perk).
+    player.mount = m ? { ...m, speed: m.speed * mountScale(host.me.faction) } : null;
     creatures.myMount = player.mount ? petId : null;
   }
   const build = new BuildPanel(
@@ -504,7 +551,7 @@ async function main() {
       account.saveLocalCharacter(character.id, {
         pos: [player.renderPos.x, player.renderPos.y, player.renderPos.z], name: settings.data.name,
         level: p.level, xp: p.xp, mastery: p.mastery, discovered: p.discovered, arts: p.arts, rank: p.rank,
-        inv: p.inv, milestones: p.milestones, pets: p.pets,
+        inv: p.inv, milestones: p.milestones, pets: p.pets, standing: p.standing,
       });
     }
   };
@@ -519,11 +566,11 @@ async function main() {
 
   settings.onChange((s) => {
     if (s.name === host.me.name) return;
-    nameplate.set(s.name);
     host.me.name = s.name;
     if (host instanceof NetCombat) host.room.send('profile', { name: s.name });
   });
 
+  let myPlate = settings.data.name;
   const tpc = new ThirdPersonCamera(camera, input, settings, physics, groundAt);
   const fly = new FlyCamera(camera, input, groundAt);
   let freeCam = false;
@@ -558,7 +605,7 @@ async function main() {
   crosshair.className = 'crosshair hidden';
   document.body.appendChild(crosshair);
   function updateHint() {
-    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || petsUi.isOpen || freeCam);
+    hint.classList.toggle('hidden', input.pointerLocked || menu.isOpen || mastery.isOpen || artsPanel.isOpen || build.isOpen || petsUi.isOpen || worldMap.isOpen || shop.isOpen || factionPanel.isOpen || freeCam);
     crosshair.classList.toggle('hidden', !input.pointerLocked);
   }
   gr.renderer.domElement.addEventListener('click', () => {
@@ -574,6 +621,7 @@ async function main() {
       scene, camera, renderer: gr.renderer, dayNight, sampler, streamer, physics, player, settings, menu, input, tpc, swActive,
       abilities, vfx, view, elementContext, eventTaps, remotes, tp, netReady, account, character, zoneHud, dialog, hubs, xpHud, mastery, partyUi, saveLocal, artsPanel, spirit, build, structView, nodeView,
       creatures, marks, telegraphs, petsUi, trustUi, announcer, bossBar, obstacles: worldObstacles(), wildInfo: { speciesById, petDef, densNear, bossById },
+      territoryView, worldMap, chat, shop, factionPanel, crewPrompt, warHud,
       get netStatus() { return netStatus; },
       get host() { return host; },
       get me() { return host.me; },
@@ -628,7 +676,7 @@ async function main() {
       if (freeCam && spirit.t <= 0) fly.update(dt);
       if (!me.dead) player.update(dt, tpc.yaw);
       syncMe();
-      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy && !petsUi.isOpen && !trustUi.active) abilities.update(dt, me.blocking);
+      if (!freeCam && !mastery.isOpen && !artsPanel.isOpen && !build.busy && !petsUi.isOpen && !trustUi.active && !worldMap.isOpen && !shop.isOpen && !factionPanel.isOpen && !chat.typing) abilities.update(dt, me.blocking);
       for (const e of host.update(dt, abilities.aim)) onCombatEvent(e);
       if (host instanceof NetCombat) {
         for (const c of host.corrections.splice(0)) {
@@ -639,6 +687,22 @@ async function main() {
       }
       remotes.update(dt, host.entities, host.me.id, partyUi.memberIds(), (id) => creatures.seatOf(id, host.entities));
       for (const n of host.notices.splice(0)) zoneHud.show(n.text, n.warn);
+      // Fast travel (and any other move the authority makes).
+      for (const w of host.warps.splice(0)) {
+        setMount(null);
+        player.teleport(w[0], w[2]);
+      }
+      // Territory: flags and capture circles, the world map, your crew tag over your head.
+      territoryView.update(dt, host.terr);
+      if (controls.pressed('worldMap')) worldMap.toggle();
+      worldMap.update(mapState());
+      chat.update(dt);
+      shop.update(player.renderPos.x, player.renderPos.z);
+      if (controls.pressed('faction')) factionPanel.toggle();
+      factionPanel.update();
+      warHud.update(host, player.renderPos.x, player.renderPos.z);
+      const plate = `${me.tag ? `[${me.tag}] ` : ''}${me.name}`;
+      if (plate !== myPlate) nameplate.set((myPlate = plate));
       // Progression and parties.
       for (const g of host.xpLog.splice(0)) xpHud.gain(g, host.progress);
       xpHud.update(dt, host.progress);
@@ -657,9 +721,18 @@ async function main() {
       if (player.flying) (flightBar.firstElementChild as HTMLElement).style.width = `${Math.min(100, (player.flightLeft / flightTotal) * 100)}%`;
       mastery.update();
       if (controls.pressed('partyInvite') && !partyUi.inviteLookedAt(camera)) zoneHud.show(`Look at a player within ${PROG.party.inviteRange} m to invite them`, true);
-      if (partyUi.pendingInvite && controls.pressed('acceptInvite')) partyUi.answer(true);
-      if (partyUi.pendingInvite && controls.pressed('declineInvite')) partyUi.answer(false);
+      // Y/N answer the party invite first, then a crew invite.
+      const yes = controls.pressed('acceptInvite');
+      const no = controls.pressed('declineInvite');
+      if (partyUi.pendingInvite) {
+        if (yes) partyUi.answer(true);
+        if (no) partyUi.answer(false);
+      } else if (crewPrompt.pending) {
+        if (yes) crewPrompt.answer(true);
+        if (no) crewPrompt.answer(false);
+      }
       partyUi.update(dt, { accept: keyOf('acceptInvite'), decline: keyOf('declineInvite') });
+      crewPrompt.update(dt, { accept: keyOf('acceptInvite'), decline: keyOf('declineInvite') });
       blindFog.classList.toggle('on', me.statuses.has('blind'));
       zoneHud.pvp = me.pvp;
       zoneHud.update(dt, player.renderPos.x, player.renderPos.z);

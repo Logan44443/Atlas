@@ -32,7 +32,7 @@ export class ChunkMinimap {
     parent.appendChild(this.canvas);
     parent.appendChild(legend);
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'F4' || e.code === 'KeyM') {
+      if (e.code === 'F4') {
         this.visible = !this.visible;
         this.canvas.style.display = legend.style.display = this.visible ? '' : 'none';
       }

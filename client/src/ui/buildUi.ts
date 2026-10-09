@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
 import {
-  BAG_CAP, BUILD, CHEST_CAP, MATERIALS, PIECES, halfExtents, invTotal, materialName, pieceById, raidText, restHeight, shortfall, snapPlacement,
+  BAG_CAP, BUILD, CHEST_CAP, MATERIALS, PIECES, basePieces, crewRaidText, halfExtents, invTotal, materialName, pieceById, raidText, restHeight, shortfall, snapFor,
   type Builder, type Inventory, type Structure,
 } from '@shared/building';
+import { roleAtLeast } from '@shared/crews';
 import { ENV_RECIPES, FORGE_RANGE, FORGE_RECIPES, GATHER_RANGE, SOURCE_RANGE } from '@shared/crafting';
 import { NODE_DEFS, nearestNode } from '@shared/resources';
 import type { CombatHost } from '../game/combat/host';
@@ -92,7 +93,19 @@ export class BuildPanel {
   private builder(): Builder {
     const h = this.host();
     const e = h.me;
-    return { charId: h.charId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: h.progress.inv };
+    const c = h.crew;
+    const role = c?.members.find((m) => m.charId === h.charId)?.role;
+    return {
+      charId: h.charId, name: e.name, side: e.side, faction: e.faction, x: e.pos.x, z: e.pos.z, inv: h.progress.inv, rank: h.progress.rank,
+      crew: c && role ? { id: c.id, tag: c.tag, officer: roleAtLeast(role, 'officer'), level: c.level, raidStart: c.raidStart } : null,
+    };
+  }
+
+  /** Pieces you may take down: your camp's, and your crew base's if you're an officer. */
+  private removable(): Structure[] {
+    const h = this.host();
+    const b = this.builder();
+    return [...h.camps.ofOwner(h.charId), ...(b.crew?.officer ? h.camps.ofCrew(b.crew.id) : [])];
   }
 
   private onClick(e: MouseEvent): void {
@@ -162,27 +175,36 @@ export class BuildPanel {
     const chest = this.chestNear();
     const forge = this.forgeNear();
     const mine = h.camps.ofOwner(h.charId);
-    const nearMine = mine
+    const nearMine = this.removable()
       .map((s) => ({ s, d: Math.hypot(s.x - e.pos.x, s.z - e.pos.z) }))
       .filter((x) => x.d <= BUILD.placeRange)
       .sort((a, b) => a.d - b.d)
       .slice(0, 8);
-    const key = JSON.stringify([p.inv, chest?.store, !!forge, nearMine.map((x) => [x.s.id, x.s.hp]), mine.length, Math.floor(Date.now() / 30000)]);
+    const crew = h.crew;
+    const crewPieces = crew ? h.camps.ofCrew(crew.id) : [];
+    const key = JSON.stringify([p.inv, chest?.store, !!forge, nearMine.map((x) => [x.s.id, x.s.hp]), mine.length, crewPieces.length, crew?.level, p.rank, Math.floor(Date.now() / 30000)]);
     if (key === this.key) return;
     this.key = key;
     const fire = h.camps.campfireOf(h.charId);
-    const camp = fire
-      ? `Your camp: ${mine.length}/${BUILD.maxPieces} pieces at ${Math.round(fire.x)}, ${Math.round(fire.z)}`
+    let camp = fire
+      ? `Your camp: ${mine.length}/${BUILD.maxPieces + h.camps.workshopBonus(mine)} pieces at ${Math.round(fire.x)}, ${Math.round(fire.z)}`
       : 'No camp yet: place a campfire in the Wilds (not near a hub) to start one';
+    if (crew) {
+      const hall = h.camps.hallOf(crew.id);
+      camp += hall
+        ? ` · [${crew.tag}] base: ${crewPieces.length}/${basePieces(crew.level) + h.camps.workshopBonus(crewPieces)} pieces, ${crewRaidText(crew.raidStart, Date.now())}`
+        : ` · [${crew.tag}] has no hall yet: an officer raises one on a free base plot (world map)`;
+    }
     const bag = Object.entries(p.inv)
       .map(([k, n]) => `<div class="c-item">${icon(k)} <b>${n}</b> ${esc(materialName(k))}${chest ? ` <button class="secondary tiny" data-put="${k}" title="Store in chest">→</button>` : ''}</div>`)
       .join('');
     const pieces = PIECES.map((pc) => {
       const short = shortfall(p.inv, pc.cost);
-      return `<div class="c-piece m-node ${short ? '' : 'some'}">
+      const locked = (pc.rank ?? 1) > p.rank ? `Faction rank ${pc.rank}` : pc.effect === 'hall' && !crew ? 'Crews only' : '';
+      return `<div class="c-piece m-node ${short || locked ? '' : 'some'} ${locked ? 'locked' : ''}">
         <div class="a-top"><b>${esc(pc.name)}</b><span class="m-rank">${pc.hp} hp${pc.effect ? ` · ${esc(pc.effect)}` : ''}</span></div>
-        <small class="c-cost">${costText(pc.cost, p.inv)}</small>
-        <button class="${short ? 'secondary' : ''}" data-piece="${pc.id}">Build</button></div>`;
+        <small class="c-cost">${locked ? `<span class="short">${esc(locked)}</span> · ` : ''}${costText(pc.cost, p.inv)}</small>
+        <button class="${short || locked ? 'secondary' : ''}" data-piece="${pc.id}">Build</button></div>`;
     }).join('');
     const chestHtml = chest
       ? `<h4>Chest (${invTotal(chest.store ?? {})}/${CHEST_CAP}) <button class="secondary tiny" data-putall>Store everything</button></h4><div class="c-bag">${
@@ -195,7 +217,7 @@ export class BuildPanel {
       ? `<h4>Forge</h4><div class="c-bag">${FORGE_RECIPES.map((r) => `<div class="c-item"><b>${esc(r.name)}</b> <small>${costText(r.inputs, p.inv)}</small> <button class="${shortfall(p.inv, r.inputs) ? 'secondary' : ''}" data-forge="${r.id}">Forge</button></div>`).join('')}</div>`
       : '';
     const removeHtml = nearMine.length
-      ? `<h4>Your pieces nearby</h4><div class="c-bag">${nearMine.map(({ s }) => `<div class="c-item">${esc(pieceById(s.piece)!.name)} <small>${s.hp}/${s.maxHp}</small> <button class="secondary tiny" data-remove="${s.id}">Take down</button></div>`).join('')}</div>`
+      ? `<h4>Your${crew ? ' and your crew\'s' : ''} pieces nearby</h4><div class="c-bag">${nearMine.map(({ s }) => `<div class="c-item">${esc(pieceById(s.piece)!.name)} <small>${s.hp}/${s.maxHp}</small> <button class="secondary tiny" data-remove="${s.id}">Take down</button></div>`).join('')}</div>`
       : '';
     const k = this.keys();
     this.el.innerHTML = `<div class="m-panel">
@@ -218,7 +240,8 @@ export class BuildPanel {
     const [hx, hy, hz] = halfExtents(def.id, this.rot);
     const ahead = Math.max(hx, hz) + 2.5;
     // Forward is where the camera looks (yaw 0 = -z, matching the third-person camera).
-    const s = snapPlacement(e.pos.x - Math.sin(cameraYaw) * ahead, e.pos.z - Math.cos(cameraYaw) * ahead, this.rot);
+    // (A crew hall snaps onto the base plot's centre.)
+    const s = snapFor(def.id, e.pos.x - Math.sin(cameraYaw) * ahead, e.pos.z - Math.cos(cameraYaw) * ahead, this.rot);
     const y = restHeight(def.id, s.x, s.z, s.rot, this.groundAt);
     const err = h.camps.check(this.builder(), { piece: def.id, ...s }) ?? '';
     this.ghostAt = { x: s.x, z: s.z, err };

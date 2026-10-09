@@ -5,7 +5,9 @@ import piecesData from '../data/buildings/pieces.json';
 import rulesData from '../data/buildings/rules.json';
 import matData from '../data/crafting/materials.json';
 import worldData from '../data/world.json';
-import { FACTIONS, zoneAt } from './factions';
+import crewsJson from '../data/crews.json';
+import territoryData from '../data/territory.json';
+import { FACTIONS, PLOTS, factionById, zoneAt } from './factions';
 
 export interface PieceDef {
   id: string;
@@ -18,6 +20,10 @@ export interface PieceDef {
   solid: boolean;
   effect?: string;
   tier: string;
+  /** faction rank needed to build it (standing.json) */
+  rank?: number;
+  /** spirit-warded: share of incoming structure damage it shrugs off */
+  ward?: number;
 }
 
 export const PIECES = piecesData.pieces as unknown as PieceDef[];
@@ -122,6 +128,12 @@ export interface Structure {
   store?: Inventory;
   /** wall time (ms) the owner was last online; camps of owners gone burnOfflineHours burn down */
   ownerSeen: number;
+  /** crew base pieces (Phase 11): the crew they belong to; the owner is whoever built it */
+  crew?: string;
+  /** crew hall: the crew's tag, the UTC hour its raid window opens, and when it was last sacked */
+  tag?: string;
+  raidStart?: number;
+  sackedAt?: number;
 }
 
 /** Axis-aligned half extents (rotation is in quarter turns, so boxes stay axis aligned). */
@@ -186,7 +198,28 @@ export function raidText(ms = Date.now()): string {
   return `Raids open at ${String(start).padStart(2, '0')}:00 UTC (in ${fmt(next)})`;
 }
 
+/** Is a crew base's own raid window (starting at UTC hour `start`) open at `ms`? */
+export function crewRaidOpen(start: number, ms: number): boolean {
+  const h = (ms / HOUR) % 24;
+  return (h - start + 24) % 24 < crewsJson.raid.hours;
+}
+
+export function crewRaidText(start: number, ms: number): string {
+  const h = (ms / HOUR) % 24;
+  const into = (h - start + 24) % 24;
+  const hours = crewsJson.raid.hours;
+  const fmt = (x: number) => `${Math.floor(x)} h ${Math.floor((x % 1) * 60)} m`;
+  const span = `${String(start).padStart(2, '0')}:00-${String((start + hours) % 24).padStart(2, '0')}:00 UTC`;
+  return into < hours ? `Raid window open (${span}, ${fmt(hours - into)} left)` : `Raid window ${span} (opens in ${fmt((start - h + 24) % 24)})`;
+}
+
 // ---- camps ----------------------------------------------------------------------------
+
+/** Pieces a crew base of this crew level may hold (before workshops). */
+export const basePieces = (level: number): number => crewsJson.base.pieces + crewsJson.base.piecesPerLevel * (level - 1);
+
+/** The crew base plot a point falls on, if any. */
+export const plotAt = (x: number, z: number) => PLOTS.find((p) => Math.hypot(p.x - x, p.z - z) <= territoryData.plotRadius);
 
 /** Who is building: a character and what they carry. */
 export interface Builder {
@@ -197,6 +230,20 @@ export interface Builder {
   x: number;
   z: number;
   inv: Inventory;
+  /** faction rank (rank-gated pieces) */
+  rank?: number;
+  /** their crew, if any (crew halls and base pieces) */
+  crew?: { id: string; tag: string; officer: boolean; level: number; raidStart: number } | null;
+}
+
+/** Where a placement really goes: the grid, and a crew hall onto its plot's centre. */
+export function snapFor(piece: string, x: number, z: number, rot: number): { x: number; z: number; rot: number } {
+  const p = snapPlacement(x, z, rot);
+  if (pieceById(piece)?.effect === 'hall') {
+    const plot = plotAt(x, z);
+    if (plot) return { x: plot.x, z: plot.z, rot: p.rot };
+  }
+  return p;
 }
 
 export interface Placement {
@@ -206,7 +253,14 @@ export interface Placement {
   rot: number;
 }
 
-export type DamageResult = { kind: 'hit' | 'broke'; s: Structure; amount: number } | { kind: 'refused'; reason: string } | null;
+export type DamageResult = { kind: 'hit' | 'broke'; s: Structure; amount: number; sacked?: boolean } | { kind: 'refused'; reason: string } | null;
+
+/** Who is hitting a structure. */
+export interface Raider {
+  side: string;
+  element: string | null;
+  faction?: string;
+}
 
 type Listener = (s: Structure, change: 'add' | 'hp' | 'del') => void;
 
@@ -242,12 +296,32 @@ export class Camps {
     }
   }
 
+  /** A character's camp (crew base pieces they built belong to the crew). */
   ofOwner(charId: string): Structure[] {
-    return [...this.all.values()].filter((s) => s.owner === charId);
+    return [...this.all.values()].filter((s) => s.owner === charId && !s.crew);
+  }
+  ofCrew(crew: string): Structure[] {
+    return [...this.all.values()].filter((s) => s.crew === crew);
   }
   campfireOf(charId: string): Structure | undefined {
-    for (const s of this.all.values()) if (s.owner === charId && s.piece === 'campfire') return s;
+    for (const s of this.all.values()) if (s.owner === charId && s.piece === 'campfire' && !s.crew) return s;
     return undefined;
+  }
+  hallOf(crew: string): Structure | undefined {
+    for (const s of this.all.values()) if (s.crew === crew && pieceById(s.piece)?.effect === 'hall') return s;
+    return undefined;
+  }
+  halls(): Structure[] {
+    return [...this.all.values()].filter((s) => pieceById(s.piece)?.effect === 'hall');
+  }
+  /** Workshops raise a camp's or base's piece limit. */
+  workshopBonus(list: Structure[]): number {
+    return Math.min(BUILD.workshop.maxCounted, list.filter((s) => pieceById(s.piece)?.effect === 'workshop').length) * BUILD.workshop.pieces;
+  }
+  /** The base a crew member is building in: their crew's hall when the spot is within its radius. */
+  private baseFor(b: Builder, x: number, z: number): Structure | undefined {
+    const hall = b.crew ? this.hallOf(b.crew.id) : undefined;
+    return hall && Math.hypot(x - hall.x, z - hall.z) <= crewsJson.base.radius ? hall : undefined;
   }
   near(x: number, z: number, r: number): Structure[] {
     return [...this.all.values()].filter((s) => Math.hypot(s.x - x, s.z - z) <= r);
@@ -257,20 +331,39 @@ export class Camps {
   check(b: Builder, p: Placement): string | null {
     const def = pieceById(p.piece);
     if (!def) return 'Unknown piece';
+    if (def.rank && (b.rank ?? 1) < def.rank) return `${def.name} needs faction rank ${def.rank}`;
     const zone = zoneAt(p.x, p.z);
     if (zone.kind !== 'wilds') return 'Camps can only be built in the Wilds';
     for (const f of FACTIONS) if (Math.hypot(p.x - f.hub.x, p.z - f.hub.z) < BUILD.minHubDistance + f.hub.safeRadius) return `Too close to ${f.hub.name}`;
-    if (Math.hypot(p.x - b.x, p.z - b.z) > BUILD.placeRange) return 'Too far away to build there';
+    if (Math.hypot(p.x - b.x, p.z - b.z) > BUILD.placeRange + (def.effect === 'hall' ? territoryData.plotRadius : 0)) return 'Too far away to build there';
     const fire = this.campfireOf(b.charId);
-    if (def.effect === 'respawn') {
+    const base = this.baseFor(b, p.x, p.z);
+    if (def.effect === 'hall') {
+      if (!b.crew) return 'Crew halls are for crews: found or join one first';
+      if (!b.crew.officer) return 'Only crew officers and the leader raise the hall';
+      if (this.hallOf(b.crew.id)) return 'Your crew already has a hall';
+      const plot = plotAt(p.x, p.z);
+      if (!plot) return 'Crew halls go on a base plot (marked on the world map)';
+      for (const h of this.halls()) if (plotAt(h.x, h.z) === plot) return `That plot belongs to [${h.tag ?? '?'}]`;
+      for (const s of this.all.values()) {
+        if (s.piece === 'campfire' && Math.hypot(s.x - p.x, s.z - p.z) < crewsJson.base.radius + BUILD.campRadius) return `Too close to ${s.ownerName}'s camp`;
+      }
+    } else if (def.effect === 'respawn') {
       if (fire) return 'You already have a camp (remove your campfire to move it)';
       for (const s of this.all.values()) {
         if (s.piece === 'campfire' && Math.hypot(s.x - p.x, s.z - p.z) < BUILD.campRadius * 2) return `Too close to ${s.ownerName}'s camp`;
+        if (pieceById(s.piece)?.effect === 'hall' && Math.hypot(s.x - p.x, s.z - p.z) < crewsJson.base.radius + BUILD.campRadius) return `Too close to the [${s.tag ?? '?'}] crew base`;
       }
+    } else if (base && b.crew) {
+      const pieces = this.ofCrew(b.crew.id);
+      const max = basePieces(b.crew.level) + this.workshopBonus(pieces);
+      if (pieces.length >= max) return `Your crew base holds at most ${max} pieces`;
     } else {
-      if (!fire) return 'Place a campfire first: it marks your camp';
+      if (!fire) return b.crew && this.hallOf(b.crew.id) ? `Build within ${crewsJson.base.radius} m of your crew hall, or place a campfire for a camp` : 'Place a campfire first: it marks your camp';
       if (Math.hypot(p.x - fire.x, p.z - fire.z) > BUILD.campRadius) return `Must be within ${BUILD.campRadius} m of your campfire`;
-      if (this.ofOwner(b.charId).length >= BUILD.maxPieces) return `A camp holds at most ${BUILD.maxPieces} pieces`;
+      const mine = this.ofOwner(b.charId);
+      const max = BUILD.maxPieces + this.workshopBonus(mine);
+      if (mine.length >= max) return `A camp holds at most ${max} pieces`;
     }
     if (def.effect !== 'walkway' && this.groundAt(p.x, p.z) < worldData.seaLevel - 0.2) return "Can't build on water (sandstone bridges can)";
     const [hx, , hz] = halfExtents(p.piece, p.rot);
@@ -286,20 +379,29 @@ export class Camps {
 
   /** Check, pay and place. Returns the new structure or why not. */
   place(b: Builder, raw: Placement, now = Date.now()): Structure | string {
-    const p = { piece: raw.piece, ...snapPlacement(raw.x, raw.z, raw.rot) };
+    const p = { piece: raw.piece, ...snapFor(raw.piece, raw.x, raw.z, raw.rot) };
     const err = this.check(b, p);
     if (err) return err;
     const def = pieceById(p.piece)!;
     takeItems(b.inv, def.cost);
+    const hall = def.effect === 'hall';
+    const crew = hall ? b.crew!.id : def.effect === 'respawn' ? undefined : this.baseFor(b, p.x, p.z)?.crew;
     const s: Structure = {
       id: `s${now.toString(36)}${(this.seq++).toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`,
       owner: b.charId, ownerName: b.name, side: b.side, faction: b.faction, piece: p.piece,
       x: p.x, y: +restHeight(p.piece, p.x, p.z, p.rot, this.groundAt).toFixed(2), z: p.z, rot: p.rot,
       hp: def.hp, maxHp: def.hp, ownerSeen: now,
       ...(def.effect === 'storage' ? { store: {} } : {}),
+      ...(crew ? { crew } : {}),
+      ...(hall ? { tag: b.crew!.tag, raidStart: b.crew!.raidStart } : {}),
     };
     this.add(s);
     return s;
+  }
+
+  /** Something about a structure changed outside the rules (crew raid hour, tag): tell the listeners. */
+  changed(s: Structure): void {
+    if (this.all.get(s.id) === s) this.emit(s, 'hp');
   }
 
   /** Mirror a structure the authority sent (clients). */
@@ -327,12 +429,17 @@ export class Camps {
     return s;
   }
 
-  /** The owner takes a piece down and gets half its cost back (bag space permitting). */
+  /** The owner (or, in a crew base, a crew officer) takes a piece down and gets half its cost back (bag space permitting). */
   remove(b: Builder, id: string): Structure | string {
     const s = this.all.get(id);
-    if (!s || s.owner !== b.charId) return 'That is not yours';
-    if (Math.hypot(s.x - b.x, s.z - b.z) > BUILD.placeRange) return 'Get closer to take it down';
-    if (s.piece === 'campfire' && this.ofOwner(b.charId).length > 1) return 'Take down the rest of your camp first';
+    const crewOfficer = !!s?.crew && b.crew?.id === s.crew && b.crew.officer;
+    if (!s || (s.owner !== b.charId && !crewOfficer)) return 'That is not yours';
+    if (Math.hypot(s.x - b.x, s.z - b.z) > BUILD.placeRange + (pieceById(s.piece)?.effect === 'hall' ? 4 : 0)) return 'Get closer to take it down';
+    if (s.piece === 'campfire' && !s.crew && this.ofOwner(b.charId).length > 1) return 'Take down the rest of your camp first';
+    if (pieceById(s.piece)?.effect === 'hall') {
+      if (!crewOfficer) return 'Only crew officers and the leader take the hall down';
+      if (this.ofCrew(s.crew!).length > 1) return 'Take down the rest of the base first';
+    }
     if (s.store && invTotal(s.store) > 0) return 'Empty the chest first';
     const def = pieceById(s.piece)!;
     const refund: Inventory = {};
@@ -346,35 +453,74 @@ export class Camps {
    * Bending hits a structure. Only the other side can damage it, only during a
    * raid window and never inside a safe zone. Earth hits harder.
    */
-  damage(id: string, amount: number, attacker: { side: string; element: string | null }, now = Date.now()): DamageResult {
+  /** Is this structure's raid window open? Camps share the world's; crew bases have their own. */
+  raidWindow(s: Structure, now = Date.now()): { open: boolean; text: string } {
+    if (this.forceRaid !== null) return { open: this.forceRaid, text: this.forceRaid ? 'Raid window open (forced)' : 'Raid window shut (forced)' };
+    if (s.crew) {
+      const start = this.hallOf(s.crew)?.raidStart ?? crewsJson.raid.defaultStart;
+      return { open: crewRaidOpen(start, now), text: crewRaidText(start, now) };
+    }
+    return { open: raidOpen(now), text: raidText(now) };
+  }
+
+  /**
+   * Bending hits a structure. Only the other side can damage it, only during its
+   * raid window (the Ash Syndicate may chip at it outside one) and never inside a
+   * safe zone. Earth hits harder, spirit wards soak some of it.
+   */
+  damage(id: string, amount: number, attacker: Raider, now = Date.now()): DamageResult {
     const s = this.all.get(id);
     if (!s || amount <= 0) return null;
     if (!attacker.side || attacker.side === s.side) return null;
     if (zoneAt(s.x, s.z).kind === 'safe') return null;
-    if (!(this.forceRaid ?? raidOpen(now))) return { kind: 'refused', reason: `Camps can only be raided in the raid window. ${raidText(now)}` };
-    const dmg = Math.round(amount * (attacker.element === 'earth' ? BUILD.earthBonus : 1));
-    // The campfire is the camp's core: it can be beaten down but never destroyed.
-    const core = pieceById(s.piece)?.effect === 'respawn';
-    s.hp = Math.max(core ? 1 : 0, s.hp - dmg);
+    const def = pieceById(s.piece);
+    const window = this.raidWindow(s, now);
+    let dmg = amount * (attacker.element === 'earth' ? BUILD.earthBonus : 1) * (1 - (def?.ward ?? 0));
+    let floor = 0;
+    if (!window.open) {
+      const ash = factionById(attacker.faction)?.perk;
+      if (ash?.type !== 'offWindowRaids') return { kind: 'refused', reason: `${s.crew ? 'This base' : 'Camps'} can only be raided in the raid window. ${window.text}` };
+      floor = Math.ceil(s.maxHp * (ash.floor ?? 0.5));
+      if (s.hp <= floor) return { kind: 'refused', reason: 'Outside the raid window even the Ash Syndicate can only weaken it this far' };
+      dmg *= ash.value;
+    }
+    dmg = Math.max(1, Math.round(dmg));
+    // The campfire and the crew hall are cores: they can be beaten down but never destroyed.
+    const core = def?.effect === 'respawn' || def?.effect === 'hall';
+    s.hp = Math.max(core ? 1 : floor, s.hp - dmg);
     if (s.hp <= 0) {
       this.delete(id);
       return { kind: 'broke', s, amount: dmg };
     }
+    // Beating a crew hall down in its raid window sacks the base (once per window).
+    let sacked = false;
+    if (def?.effect === 'hall' && s.hp <= 1 && window.open && now - (s.sackedAt ?? 0) > crewsJson.raid.hours * HOUR) {
+      s.sackedAt = now;
+      sacked = true;
+    }
     this.emit(s, 'hp');
-    return { kind: 'hit', s, amount: dmg };
+    return { kind: 'hit', s, amount: dmg, sacked };
   }
 
   /** Owner online: stamp their camp so it doesn't burn down. */
   touch(charId: string, now = Date.now()): void {
-    for (const s of this.all.values()) if (s.owner === charId) s.ownerSeen = now;
+    for (const s of this.all.values()) if (s.owner === charId && !s.crew) s.ownerSeen = now;
+  }
+  /** A crew member is online: the base stays. */
+  touchCrew(crew: string, now = Date.now()): void {
+    for (const s of this.all.values()) if (s.crew === crew) s.ownerSeen = now;
   }
 
-  /** Camps whose owner has been away too long burn down. Returns the removed structures. */
-  burnAbandoned(online: (charId: string) => boolean, now = Date.now()): Structure[] {
-    const limit = BUILD.burnOfflineHours * HOUR;
+  /**
+   * Camps whose owner has been away too long burn down, and so do crew bases
+   * nobody from the crew has visited for burnOfflineDays. `online` says whether
+   * a structure's people are around. Returns the removed structures.
+   */
+  burnAbandoned(online: (s: Structure) => boolean, now = Date.now()): Structure[] {
     const out: Structure[] = [];
     for (const s of [...this.all.values()]) {
-      if (online(s.owner) || now - s.ownerSeen < limit) continue;
+      const limit = s.crew ? crewsJson.base.burnOfflineDays * 24 * HOUR : BUILD.burnOfflineHours * HOUR;
+      if (online(s) || now - s.ownerSeen < limit) continue;
       this.delete(s.id);
       out.push(s);
     }

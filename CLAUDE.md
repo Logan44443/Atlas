@@ -38,7 +38,14 @@ This file covers architecture, layout, conventions and the current phase. Update
   swimming mounts, pets panel `O`, ride `H`). Same PR: solid trees and boulders (player, projectiles, lightning),
   bending marks on what bending hits, and hub NPCs that give advice fitting the player. Verified with
   `scripts/pets-check.ts` and `scripts/phase10-test.mjs`.
-- **Phase 11 Territory wars, crews, polish, deployment**: next (crew bases + crew raid windows from Phase 9 too).
+- **Phase 11 Territory wars, crews, polish, deployment**: done (territory wars over 3 shrines + 6 outposts twice a day
+  with capture meters, war bands, buffs and income; faction rank 1-10 with Envoy orders, Outlaw bounties, faction
+  perks and rank unlocks; coins and the Quartermaster (shop, black market, pardons, fast travel); crews with roles,
+  bank, crew XP, crew halls on base plots and crew-set raid windows with sacking; chat channels; world map `M`;
+  faction & crew panel `U`). Deployment is prepared but not done: Dockerfile, `fly.toml`, Cloudflare Pages
+  `_headers`, `/metrics`, CI, `docs/DEPLOY.md`; real accounts wait for bob. Verified with
+  `scripts/territory-check.ts` and `scripts/phase11-test.mjs`.
+- Next: whatever bob asks for (deployment once the accounts are picked, art, balance, the hired NPC companion).
 - bob prefers several phases/features bundled into one PR rather than one PR per phase.
 - README.md is owned by a separate thread: don't edit it from build threads.
 
@@ -64,7 +71,10 @@ npx tsx scripts/building-check.ts  # placement/inventory/raid/burn/crafting rule
 node scripts/phase9-test.mjs       # gather, channel, ally mud, build a camp with the ghost, chest, raid window, reload, offline camp
 npx tsx scripts/pets-check.ts      # solid props, dens, creature XP, taming, hunger, mounts, boss rewards, Bond Trial, advice
 node scripts/phase10-test.mjs      # advice, walk into a tree, scorch mark, hunt, tame, pets panel, ride, boss + Bond Trial, offline flying mount
+npx tsx scripts/territory-check.ts # war schedule, captures, buffs, income, rank, bounties, orders, crews, crew bases, perks, shop
+node scripts/phase11-test.mjs      # capture in a war, Envoy order, shop + travel, crew create/invite/bank/hall/raid, chat, map, panel, offline war
 ```
+Deployment (not done yet, needs bob's accounts): see `docs/DEPLOY.md` (`Dockerfile`, `fly.toml`, Cloudflare Pages).
 
 URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?nosw` (skip Service Worker),
 `?offline` (don't look for a server), `?server=ws://host:port`, `?shard=<roomId>`,
@@ -73,9 +83,11 @@ URL flags: `?quality=low|medium|high|auto`, `?webgl` (force WebGL2 backend), `?n
 In game: `F3` debug overlay, `F4`/`M` chunk-state map, `G` talk to an NPC, `P` PvP flag, `K` mastery tree,
 `I` invite the player in front of you, `Y`/`N` answer an invite, `B` camp panel (bag/build/chest/forge), `C` channel
 (bend-craft), `G` also gathers at resource nodes and tames the wild animal in front of you (needs food), `O` pets panel,
-`H` ride your pet. Dev shards accept `dev:xp`, `dev:clock`, `dev:raid`, `dev:give`, `dev:clearCamp`, `dev:boss`
-(`{id, here, hp}`), `dev:bond` (force the Bond Trial roll) and `dev:pet` (put a pet in your stable); `LocalCombat`
-has the same as `devBoss`/`devBond`/`devPet`.
+`H` ride your pet, `M` world map (`F4` is the chunk map), `U` faction & crew panel, `Enter` chat. Dev shards accept
+`dev:xp`, `dev:clock`, `dev:raid`, `dev:give`, `dev:clearCamp`, `dev:boss` (`{id, here, hp}`), `dev:bond` (force the
+Bond Trial roll), `dev:pet` (put a pet in your stable), `dev:war` (true/false/null: force the territory war),
+`dev:warRate` (capture speed x n), `dev:coins` and `dev:points` (rank points); `LocalCombat` and `NetCombat` have the
+same as `devBoss`/`devBond`/`devPet`/`devWar`/`devWarRate`/`devCoins`/`devPoints`.
 
 ## Stack (fixed by design)
 
@@ -103,7 +115,9 @@ client/              Vite root (index.html, src/, public/)
   src/ui/            debug overlay, chunk minimap, settings menu, combat HUD, title/character screen, zone HUD, NPC dialog,
                      progressUi (XP bar + toasts, mastery panel, party frame + invite prompt), artsUi (arts panel + quest compass),
                      buildUi (camp panel, placement ghost, gather/channel prompts), petsUi (pets panel, trust game, boss bar,
-                     announcements), CSS
+                     announcements), worldMap (M), factionUi (faction & crew panel U, crew invite prompt, war HUD),
+                     chatUi (chat box), shopUi (Quartermaster: buy/sell/pardon/travel), CSS
+  src/world/territoryView.ts   outposts, holder flags on every point, capture circles during a war
   public/sw.js       Service Worker (versioned chunk cache)
   public/world/      GENERATED world chunks + manifest.json (gitignored)
 shared/              Pure TS used by client, workers, build scripts and (later) the server
@@ -126,10 +140,19 @@ shared/              Pure TS used by client, workers, build scripts and (later) 
   sim/wildlife.ts    dens, creature AI, bosses (schedule, phases, telegraphed moves, rewards), Bond Trial spirits
   pets.ts, petsState.ts   pet defs, taming/trust, feeding/hunger, pet AI, mounts, Bond Trial results, Beastkeeper quests
   advice.ts          what hub NPCs tell this player (hunting grounds, mastery points, next art, bosses, pets, raids)
+  territory.ts       war points (shrines + outposts), war schedule, Territory (capture meters, buffs, income), presenceAt
+  standing.ts        faction rank/points, bounties (infamy), coins helpers, Envoy orders (OrderRules)
+  factionRules.ts    kill/boss/capture/held/income rewards (FactionNews), boons, perks, pet eggs, shop and fast travel
+  crews.ts           Crews (create/invite/roles/bank/raid hour/sack), crew levels
+  sim/warbands.ts    faction NPC fighters at every point during a war
   progression.ts     XP curve, kill/discovery rewards (XpRules), mastery validation, Mods + modKit()
   clock.ts           world clock from wall time (same on every shard/client), bending context at a spot
   net.ts             wire protocol types (move/cast/welcome/correct/events)
-server/              Node shard server: index.ts (HTTP /health, /shards, /api + Colyseus), worldRoom.ts, schema.ts
+server/              Node shard server: index.ts (HTTP /health, /shards, /metrics, /api + Colyseus), worldRoom.ts, schema.ts
+  territory.ts       the process-wide Territory (all shards report presence; 1 s tick; crew income to banks)
+  crews.ts           the process-wide Crews (batched saves, pushes the crew view to online members)
+  online.ts          directory of online characters across shards (faction/whisper chat, crew messages)
+  metrics.ts         Prometheus text for /metrics, JSON logs
   api.ts             account/character REST endpoints (rate-limited)
   parties.ts         party/invite bookkeeping per shard
   camps.ts           the process-wide Camps (all shards share it), batched saves, burn-down timer
@@ -156,8 +179,14 @@ data/                ALL tunable numbers (JSON). Edit these, not code.
   wildlife.json      den grid, activation radii, creature level by hub distance, the 9 species (temper, attack, loot, tame)
   bosses.json        mini/world/legendary bosses (spot, schedule, HP per player, phases), boss moves, rewards, Bond Trial
   pets/*.json        rules (hunger, food, trust game, follow/assist) and common/rare/legendary pet defs (attack, mount, aura)
+  territory.json     war schedule, capture/income per point kind, shrine buffs, war bands, outposts, base plots
+  standing.json      rank points/titles/unlocks, bounties, coins, Envoy orders
+  crews.json         crew size, founding, levels, bank, base, raid window, sacking
+  shop.json          Quartermaster prices, black market, pardons, fast travel
 scripts/             build-world.ts, smoke.mjs (+ scenarios/), probe scripts
 docs/DESIGN.md       game design (keep in sync)
+docs/DEPLOY.md       how to deploy (Fly.io shard server, Cloudflare Pages client, PostgreSQL) once bob approves accounts
+Dockerfile, fly.toml, .github/workflows/ci.yml   server image, Fly config, CI (typecheck, rule checks, client build)
 ```
 
 ## Architecture notes
@@ -243,6 +272,20 @@ docs/DESIGN.md       game design (keep in sync)
 - **NPC advice**: `adviceFor()` (shared/advice.ts) is a pure function of the player, their progress and the world
   clock, so the dialog computes it in the browser for every non-master NPC; masters and Beastkeepers also ask the
   authority (`quest:talk`) for quest lines.
+- **Territory wars**: one `Territory` per process (`server/territory.ts`). Every room reports who stands in which
+  capture circle (`reportPresence`); a 1 s tick merges the reports, runs `Territory.update` and hands `TerrNews` to
+  every room, which rewards its own players (`factionRules.ts`) and raises/disbands `WarBands`. Clients get a `terr`
+  message every second (war text, point states, crew halls). Offline, `LocalCombat` runs its own `Territory` (saved
+  to localStorage `fw.territory`). Held points become `entity.boon` (dmg/regen/heal/armor) via `boonFor` and an XP
+  multiplier via `xpScale`.
+- **Standing**: `Progress.standing` (points, infamy, honour, coins, order, eggs) is owned by the authority; `rank` is
+  always `rankOf(points)`. `entity.infamy` replicates as `inf` (nameplate skull, Sentinel perk). Envoy talks go
+  through `quest:talk` like masters; Quartermaster trades are `shop` messages checked against the vendor's range.
+- **Crews**: online only. `server/crews.ts` keeps one `Crews` per process; rooms handle `crew` messages and push the
+  crew view (`crew`) to online members through `server/online.ts`. Crew structures carry `crew` (and the hall
+  `tag`/`raidStart`); `Camps.raidWindow` uses the crew's hour. Crews save before camps (FK). `entity.tag`
+  replicates as `tag` for nameplates. Chat (`chat` message) routes say/shard/faction/crew/party/whisper with a rate
+  limit; faction, crew and whisper cross shards through the online directory.
 - **NPCs**: the same `shared/sim/npcs.ts` brains run on the server and in `LocalCombat`. Offline every hub's NPCs
   are local, so `RemotePlayers` hides avatars beyond the interest radius to match what online would draw.
 

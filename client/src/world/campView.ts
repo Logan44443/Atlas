@@ -87,6 +87,55 @@ function drawPiece(s: Structure, b: Geo, glow: Geo): void {
       b.box('#7a5230', 0, h * 0.7, 0, 1.0, 0.16, 0.16, 0, false);
       b.add(SPHERE, '#c9b48a', 0, h, 0, 0, 0.4, 0.4, 0.4);
       break;
+    case 'crew_hall':
+      // Stone base, timber hall, a tall roof in the crew's faction colour, and a tag banner over the door.
+      b.box('#8d8a84', 0, 0, 0, w, 0.6, d, 0, false);
+      b.box('#c9c0ae', 0, 0.6, 0, w - 1, h - 2.1, d - 1, 0, false);
+      for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) b.box('#6b4f33', x * (w / 2 - 0.6), 0.6, z * (d / 2 - 0.6), 0.5, h - 2.1, 0.5, 0, false);
+      b.add(ROOF4, team, 0, h - 0.75, 0, 0, w * 1.05, 2.4, d * 1.05);
+      b.box('#3b2a1c', 0, 0.6, d / 2 - 0.45, 1.6, 2.2, 0.1, 0, false);
+      b.box(team, 0, 3.0, d / 2 - 0.42, 2.2, 0.8, 0.06, 0, false);
+      glow.add(SPHERE, '#ffd27a', -1.4, 2.2, d / 2, 0, 0.35, 0.35, 0.35);
+      glow.add(SPHERE, '#ffd27a', 1.4, 2.2, d / 2, 0, 0.35, 0.35, 0.35);
+      break;
+    case 'faction_banner':
+      b.add(CYL, '#4a3a2a', 0, h / 2, 0, 0, 0.18, h, 0.18);
+      b.box(team, 0.75, h - 2.2, 0, 1.4, 1.9, 0.05, 0, false);
+      b.box('#c9a64a', 0, h, 0, 0.3, 0.25, 0.3, 0, false);
+      break;
+    case 'pet_stable':
+      for (const x of [-1, 1]) for (const z of [-1, 1]) b.box('#6b4f33', x * (w / 2 - 0.2), 0, z * (d / 2 - 0.2), 0.3, h - 0.5, 0.3, 0, false);
+      b.box('#8a6a43', 0, 0, -d / 2 + 0.1, w, 1.2, 0.15, 0, false);
+      b.add(ROOF4, '#7a5b38', 0, h - 0.25, 0, 0, w * 0.8, 1, d * 1.1);
+      b.box('#d8c06a', -0.8, 0, 0.2, 1.4, 0.4, 1, 0, false);
+      b.box('#7a5230', 1, 0, 0.5, 1, 0.5, 0.6, 0, false);
+      break;
+    case 'workshop':
+      b.box('#9a958c', 0, 0, 0, w, h * 0.75, d, 0, false);
+      b.box('#6b4f33', 0, h * 0.75, 0, w + 0.3, 0.2, d + 0.3, 0, false);
+      b.add(CYL, '#6a6762', w / 2 - 0.5, h * 0.75 + 0.5, -d / 2 + 0.5, 0, 0.4, 1, 0.4);
+      b.box('#7a5230', 0, 0.9, d / 2 + 0.3, w * 0.7, 0.12, 0.6, 0, false);
+      glow.box('#ff9a3c', 0, 0.3, d / 2, 0.8, 0.5, 0.05, 0, false);
+      break;
+    case 'metal_gate':
+      b.box('#8d99a6', -w / 2 + 0.2, 0, 0, 0.4, h, d, 0, false);
+      b.box('#8d99a6', w / 2 - 0.2, 0, 0, 0.4, h, d, 0, false);
+      b.box('#5d6670', 0, h - 0.5, 0, w, 0.5, d, 0, false);
+      for (let x = -w / 2 + 0.7; x < w / 2 - 0.4; x += 0.5) b.box('#5d6670', x, h - 1.1, 0, 0.08, 0.6, d * 0.5, 0, false);
+      b.box(team, 0, h - 1.6, d / 2 + 0.02, 0.8, 0.5, 0.02, 0, false);
+      break;
+    case 'spirit_wall':
+    case 'spirit_gate': {
+      const gate = s.piece === 'spirit_gate';
+      if (gate) {
+        b.box('#cfd8e8', -w / 2 + 0.25, 0, 0, 0.5, h, d, 0, false);
+        b.box('#cfd8e8', w / 2 - 0.25, 0, 0, 0.5, h, d, 0, false);
+        b.box('#cfd8e8', 0, h - 0.45, 0, w, 0.45, d, 0, false);
+      } else b.box('#cfd8e8', 0, 0, 0, w, h, d, 0, false);
+      // Glowing ward runes.
+      for (const x of gate ? [-w / 2 + 0.25, w / 2 - 0.25] : [-w / 4, w / 4]) glow.box('#9fe6ff', x, h * 0.35, d / 2 + 0.02, 0.18, h * 0.4, 0.02, 0, false);
+      break;
+    }
     default:
       // Walls.
       b.box(TIER[s.piece] ?? '#8a6a43', 0, 0, 0, w, h, d, 0, false);

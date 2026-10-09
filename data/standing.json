@@ -1,0 +1,139 @@
+{
+  "_comment": "Faction standing (DESIGN section 4, Phase 11): faction rank 1-10 from rank points, Outlaw bounties (infamy) and Order honour, coins, and the Envoy's faction orders. rankPoints[i] = points needed for rank i+1.",
+  "rankPoints": [0, 100, 250, 500, 850, 1300, 1900, 2700, 3700, 5000],
+  "rankTitles": ["Recruit", "Initiate", "Sworn", "Veteran", "Warden", "Captain", "Champion", "Commander", "Exemplar", "Legend"],
+  "_points": "Rank points per deed. pvpKill counts only kills that gave XP (anti-griefing rules apply); npcKill = an enemy faction NPC. bountyShare: an Order player who defeats a bountied Outlaw gets bounty x bountyShare rank points. Captures and faction orders give their own (territory.json kinds, orders below).",
+  "points": {
+    "pvpKill": 15,
+    "bountyShare": 0.1,
+    "npcKill": 3
+  },
+  "_unlocks": "What each faction rank unlocks (shown in the faction panel). Building pieces carry their own rank requirement (buildings/pieces.json rank); egg = the Beastkeeper hands you a pet egg of that tier once.",
+  "unlocks": [
+    {
+      "rank": 2,
+      "text": "Found a crew",
+      "crew": true
+    },
+    {
+      "rank": 3,
+      "text": "Faction banner, pet stable and workshop pieces"
+    },
+    {
+      "rank": 4,
+      "text": "A common pet egg from the Beastkeeper",
+      "egg": "common"
+    },
+    {
+      "rank": 5,
+      "text": "Metal gate"
+    },
+    {
+      "rank": 6,
+      "text": "Spirit-warded walls and gates"
+    },
+    {
+      "rank": 7,
+      "text": "A rare pet egg from the Beastkeeper",
+      "egg": "rare"
+    },
+    {
+      "rank": 10,
+      "text": "A second rare pet egg",
+      "egg": "rare"
+    }
+  ],
+  "_infamy": "Outlaws who defeat Order players gain a bounty (perKill, up to max). It wears off at decayPerHour of real time. An Order player who defeats a bountied Outlaw collects it: coins = bounty, XP = bounty x xpPerBounty, and the bounty is cleared.",
+  "infamy": {
+    "perKill": 50,
+    "max": 1000,
+    "decayPerHour": 60,
+    "xpPerBounty": 2
+  },
+  "_coins": "Coins drop from kills: creatures pay creaturePerLevel x level (random 50-150%), rival faction NPCs npc, bosses boss x tier. Respec costs respecPerPoint per mastery point spent (free below respecFreeBelowLevel).",
+  "coins": {
+    "creaturePerLevel": 1.5,
+    "npc": 12,
+    "boss": {
+      "mini": 120,
+      "world": 250,
+      "legendary": 400
+    },
+    "respecPerPoint": 5,
+    "respecFreeBelowLevel": 10,
+    "startCoins": 25
+  },
+  "_orders": "Faction orders from your own faction's Envoy. kind: kill (target creature|player|npc), visit (a territory point), capture (take part in a capture), deliver (bring items to the Envoy), boss (help beat a boss). n = [min, max] count. Rewards: rank points, coins and xpPerLevel x your level. A finished order is handed in to the Envoy; a new one is given straight away.",
+  "orders": [
+    {
+      "id": "hunt",
+      "kind": "kill",
+      "target": "creature",
+      "n": [5, 8],
+      "points": 30,
+      "coins": 40,
+      "xpPerLevel": 25,
+      "text": "The roads are full of beasts. Defeat {n} wild creatures and come back."
+    },
+    {
+      "id": "raid_patrols",
+      "kind": "kill",
+      "target": "npc",
+      "n": [2, 4],
+      "points": 45,
+      "coins": 60,
+      "xpPerLevel": 35,
+      "minLevel": 6,
+      "text": "The other side's patrols harass our caravans. Defeat {n} of their faction fighters."
+    },
+    {
+      "id": "skirmish",
+      "kind": "kill",
+      "target": "player",
+      "n": [1, 3],
+      "points": 60,
+      "coins": 80,
+      "xpPerLevel": 50,
+      "minLevel": 10,
+      "text": "Show the other side our strength: defeat {n} of their benders in contested land or the flagged Wilds."
+    },
+    {
+      "id": "scout",
+      "kind": "visit",
+      "n": [1, 1],
+      "points": 25,
+      "coins": 30,
+      "xpPerLevel": 20,
+      "text": "Our scouts lost contact with {place}. Go there and see who holds it."
+    },
+    {
+      "id": "take_ground",
+      "kind": "capture",
+      "n": [1, 1],
+      "points": 70,
+      "coins": 90,
+      "xpPerLevel": 50,
+      "text": "When the war horn sounds, help capture a shrine or outpost."
+    },
+    {
+      "id": "supply",
+      "kind": "deliver",
+      "items": ["wood", "stone", "meat", "hide", "sand"],
+      "n": [8, 15],
+      "points": 25,
+      "coins": 35,
+      "xpPerLevel": 20,
+      "text": "The quartermaster is short. Bring me {n} {item}."
+    },
+    {
+      "id": "beast_hunt",
+      "kind": "boss",
+      "n": [1, 1],
+      "points": 80,
+      "coins": 120,
+      "xpPerLevel": 60,
+      "minLevel": 12,
+      "text": "Help bring down a rare beast or a world boss."
+    }
+  ]
+}
