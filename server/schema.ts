@@ -14,8 +14,8 @@ export const EntityState = schema(
     y: 'float32',
     z: 'float32',
     yaw: 'float32',
-    hp: 'uint16',
-    maxHp: 'uint16',
+    hp: 'uint32',
+    maxHp: 'uint32',
     chi: 'uint8',
     maxChi: 'uint8',
     dead: 'boolean',
@@ -30,6 +30,14 @@ export const EntityState = schema(
     fac: 'string',
     role: 'string',
     title: 'string',
+    /** creature / pet species (picks the model), owner of a pet, model scale, body size */
+    beast: 'string',
+    own: 'string',
+    sc: 'float32',
+    rad: 'float32',
+    hgt: 'float32',
+    /** a Bond Trial spirit: the only player who may fight it */
+    tri: 'string',
   },
   'EntityState',
 );

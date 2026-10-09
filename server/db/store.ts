@@ -34,6 +34,8 @@ export interface CharacterRow {
   /** materials carried and building milestones (Phase 9) */
   inv: Record<string, number>;
   milestones: string[];
+  /** pets state (see shared/petsState.ts) */
+  pets: unknown;
   createdAt: string;
 }
 
@@ -47,6 +49,7 @@ export interface CharacterSave {
   arts?: unknown;
   inv?: Record<string, number>;
   milestones?: string[];
+  pets?: unknown;
 }
 
 export class StoreError extends Error {
@@ -97,6 +100,7 @@ const toChar = (r: Row): CharacterRow => ({
   arts: r.arts ?? {},
   inv: (r.inv as Record<string, number>) ?? {},
   milestones: (r.milestones as string[]) ?? [],
+  pets: r.pets ?? {},
   createdAt: new Date(r.created_at as string).toISOString(),
 });
 const toAccount = (r: Row): Account => ({ id: r.id as string, username: r.username as string, guest: r.guest as boolean });
@@ -226,13 +230,13 @@ export class PgStore implements Store {
          x = COALESCE($2, x), y = COALESCE($3, y), z = COALESCE($4, z),
          level = COALESCE($5, level), xp = COALESCE($6, xp), faction_rank = COALESCE($7, faction_rank),
          mastery = COALESCE($8::jsonb, mastery), discovered = COALESCE($9::jsonb, discovered), arts = COALESCE($10::jsonb, arts),
-         inv = COALESCE($11::jsonb, inv), milestones = COALESCE($12::jsonb, milestones),
+         inv = COALESCE($11::jsonb, inv), milestones = COALESCE($12::jsonb, milestones), pets = COALESCE($13::jsonb, pets),
          last_seen = now()
        WHERE id = $1`,
       [
         id, s.pos?.[0] ?? null, s.pos?.[1] ?? null, s.pos?.[2] ?? null, s.level ?? null, s.xp ?? null, s.rank ?? null,
         s.mastery ? JSON.stringify(s.mastery) : null, s.discovered ? JSON.stringify(s.discovered) : null, s.arts ? JSON.stringify(s.arts) : null,
-        s.inv ? JSON.stringify(s.inv) : null, s.milestones ? JSON.stringify(s.milestones) : null,
+        s.inv ? JSON.stringify(s.inv) : null, s.milestones ? JSON.stringify(s.milestones) : null, s.pets ? JSON.stringify(s.pets) : null,
       ],
     );
   }
@@ -314,7 +318,7 @@ export class MemoryStore implements Store {
   async createCharacter(accountId: string, c: { name: string; element: ElementId; faction: FactionId }, maxSlots: number): Promise<CharacterRow> {
     if ((await this.listCharacters(accountId)).length >= maxSlots) throw new StoreError('slots_full', `All ${maxSlots} character slots are used`);
     for (const o of this.chars.values()) if (o.name.toLowerCase() === c.name.toLowerCase()) throw new StoreError('name_taken', 'That name is taken');
-    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], arts: {}, inv: {}, milestones: [], createdAt: new Date().toISOString() };
+    const row: CharacterRow = { id: randomUUID(), accountId, ...c, level: 1, xp: 0, rank: 1, pos: null, mastery: {}, discovered: [], arts: {}, inv: {}, milestones: [], pets: {}, createdAt: new Date().toISOString() };
     this.chars.set(row.id, row);
     return row;
   }
@@ -344,6 +348,7 @@ export class MemoryStore implements Store {
     if (s.rank !== undefined) c.rank = s.rank;
     if (s.inv) c.inv = { ...s.inv };
     if (s.milestones) c.milestones = [...s.milestones];
+    if (s.pets) c.pets = JSON.parse(JSON.stringify(s.pets));
   }
 
   async loadStructures(): Promise<Structure[]> {

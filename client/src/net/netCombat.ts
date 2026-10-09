@@ -7,6 +7,7 @@ import { computeMods, newProgress, type Progress } from '@shared/progression';
 import { applyArtsToEntity, createPlayerEntity, PLAYER_SHAPE, type CombatHost, type QuestLine, type XpGain } from '../game/combat/host';
 import { sideOf } from '@shared/factions';
 import { Camps, type Inventory, type Structure } from '@shared/building';
+import type { TrustGame } from '@shared/pets';
 
 /** What the client reads from a replicated entity (see server/schema.ts). */
 interface EntityStateView {
@@ -34,6 +35,12 @@ interface EntityStateView {
   fac: string;
   role: string;
   title: string;
+  beast: string;
+  own: string;
+  sc: number;
+  rad: number;
+  hgt: number;
+  tri: string;
 }
 
 interface WorldStateView {
@@ -92,7 +99,9 @@ export class NetCombat implements CombatHost {
   private closed = false;
   corrections: CorrectMsg[] = [];
   notices: Array<{ text: string; warn?: boolean }> = [];
-  onClose: (() => void) | null = null;
+  onClose: ((code: number) => void) | null = null;
+  /** True once this tab chose to leave (switching character, tests): no reconnecting then. */
+  left = false;
   progress: Progress = newProgress();
   readonly xpLog: XpGain[] = [];
   party: PartyInfo | null = null;
@@ -103,6 +112,8 @@ export class NetCombat implements CombatHost {
   /** Mirror of the structures the shard streams to us. */
   readonly camps = new Camps((x, z) => this.groundAt(x, z));
   readonly charId: string;
+  readonly trustGames: TrustGame[] = [];
+  readonly announcements: string[] = [];
 
   private constructor(
     readonly room: Room<WorldStateView>,
@@ -133,6 +144,8 @@ export class NetCombat implements CombatHost {
     });
     room.onMessage('invite', (m: InviteMsg) => this.invites.push(m));
     room.onMessage('quest', (m: QuestLine) => this.questLines.push(m));
+    room.onMessage('trust', (m: TrustGame) => this.trustGames.push(m));
+    room.onMessage('announce', (text: string) => this.announcements.push(String(text)));
     room.onMessage('structs', (list: Structure[]) => {
       for (const st of list) this.camps.upsert(st);
     });
@@ -145,9 +158,9 @@ export class NetCombat implements CombatHost {
       this.clockOffset = m.s + this.rtt / 2 - now;
     });
     room.onStateChange((s) => this.onState(s));
-    room.onLeave(() => {
+    room.onLeave((code) => {
       this.closed = true;
-      this.onClose?.();
+      this.onClose?.(code);
     });
     this.onState(room.state);
   }
@@ -185,6 +198,7 @@ export class NetCombat implements CombatHost {
 
   leave(): void {
     this.closed = true;
+    this.left = true;
     this.room.leave();
   }
 
@@ -238,6 +252,32 @@ export class NetCombat implements CombatHost {
     if (!this.closed) this.room.send('dev:give', items);
   }
 
+  tame(): void {
+    if (!this.closed) this.room.send('pet:tame');
+  }
+  trust(success: boolean): void {
+    if (!this.closed) this.room.send('pet:trust', success);
+  }
+  setPet(uid: string | null): void {
+    if (!this.closed) this.room.send('pet:active', uid);
+  }
+  feedPet(uid: string): void {
+    if (!this.closed) this.room.send('pet:feed', uid);
+  }
+  toggleMount(): void {
+    if (!this.closed) this.room.send('pet:mount');
+  }
+  /** Dev shards only: raise a boss (next to you with here), force Bond Trial rolls. */
+  devBoss(id: string, here = false, hp?: number): void {
+    if (!this.closed) this.room.send('dev:boss', { id, here, hp });
+  }
+  devPet(kind: string): void {
+    if (!this.closed) this.room.send('dev:pet', kind);
+  }
+  devBond(on: boolean | null): void {
+    if (!this.closed) this.room.send('dev:bond', on);
+  }
+
   talkTo(npcId: string): void {
     if (!this.closed) this.room.send('quest:talk', npcId);
   }
@@ -289,7 +329,12 @@ export class NetCombat implements CombatHost {
             ? createPlayerEntity(id, st.name, (st.el || null) as ElementId | null)
             : st.kind === 'npc'
               ? createEntity({ id, name: st.name, kind: 'npc', team: st.team, role: st.role, title: st.title, element: (st.el || null) as ElementId | null, ...PLAYER_SHAPE })
-              : createEntity({ id, name: st.name, kind: 'dummy', team: st.team, radius: 0.4, height: 2.2 });
+              : st.kind === 'creature' || st.kind === 'pet'
+                ? createEntity({
+                    id, name: st.name, kind: st.kind, team: st.team, role: st.role, title: st.title, element: (st.el || null) as ElementId | null,
+                    beast: st.beast, owner: st.own, scale: st.sc || 1, radius: st.rad || 0.5, height: st.hgt || 1.2,
+                  })
+                : createEntity({ id, name: st.name, kind: 'dummy', team: st.team, radius: 0.4, height: 2.2 });
         e.pos.set(st.x, st.y, st.z);
         e.yaw = st.yaw;
         r = { entity: e, samples: [] };
@@ -310,6 +355,8 @@ export class NetCombat implements CombatHost {
       r.entity.windup = st.wu;
       if (st.kind !== 'dummy' && st.el) r.entity.element = st.el as ElementId;
       if (st.kind === 'player') Object.assign(r.entity, PLAYER_SHAPE);
+      // Swapping pets reuses the pet's id: take the new body.
+      if (st.kind === 'pet' || st.kind === 'creature') Object.assign(r.entity, { beast: st.beast, owner: st.own, scale: st.sc || 1, radius: st.rad || 0.5, height: st.hgt || 1.2, trialOf: st.tri ?? '' });
     });
     for (const id of [...this.remotes.keys()]) {
       if (!seen.has(id)) {

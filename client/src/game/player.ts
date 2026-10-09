@@ -44,6 +44,8 @@ export class Player {
   private flyT = 0;
   /** Spirit projection: the body stays put. */
   frozen = false;
+  /** Riding a pet (Phase 10): run speed multiplier, flying and swimming mounts. */
+  mount: { speed: number; fly?: boolean; swim?: number } | null = null;
   private dashT = 0;
   private dashVel = new THREE.Vector3();
   private faceYaw: number | null = null;
@@ -133,6 +135,9 @@ export class Player {
     this.body.setTranslation({ x, y, z }, true);
     this.curr.set(x, y, z);
     this.prev.copy(this.curr);
+    // Right away, not on the next update: that doesn't run while you're down, and the
+    // shard reads your position from here (a respawn would otherwise look like a speed hack).
+    this.renderPos.set(x, y - this.centerOffset, z);
     this.velocity.set(0, 0, 0);
   }
 
@@ -140,7 +145,7 @@ export class Player {
     // Edge-triggered inputs are sampled once per frame and consumed by the next step.
     if (this.controls.pressed('jump')) {
       // In the air with a glider: jump opens or closes it instead.
-      if (this.canGlide && !this.grounded && this.coyote <= 0 && !this.swimming && !this.flying) this.gliding = !this.gliding;
+      if (this.canGlide && !this.mount && !this.grounded && this.coyote <= 0 && !this.swimming && !this.flying) this.gliding = !this.gliding;
       else this.jumpBuffer = C.jumpBuffer;
     }
     const dodgePressed =
@@ -171,7 +176,7 @@ export class Player {
   }
 
   private tryDodge(cameraYaw: number): void {
-    if (this.dodgeCd > 0 || this.isDodging || this.swimming || this.rooted || this.staggered || this.frozen) return;
+    if (this.dodgeCd > 0 || this.isDodging || this.swimming || this.rooted || this.staggered || this.frozen || this.mount) return;
     const dir = this.moveInput(cameraYaw);
     if (dir.lengthSq() === 0) dir.set(Math.sin(this.facing), 0, Math.cos(this.facing)).negate(); // backstep
     this.dodgeDir.copy(dir);
@@ -192,10 +197,14 @@ export class Player {
     if (this.blocking) speed *= 0.35;
     speed *= this.moveScale;
     if (this.rooted || this.staggered || this.frozen) speed = 0;
+    const ride = this.mount;
+    // On a flying mount you hover once you leave the ground: jump climbs, sprint dives.
+    const mountFlying = !!ride?.fly && (!this.grounded || this.controls.down('jump'));
+    if (ride && !this.rooted && !this.staggered && !this.frozen) speed = (this.swimming ? C.swim.speed * (ride.swim ?? 1) : C.runSpeed * ride.speed) * this.moveScale;
     if (this.flying) speed = artsData.flight.speed * this.moveScale;
     else if (this.gliding) speed = artsData.glider.speed * this.moveScale;
     const target = input.clone().multiplyScalar(speed);
-    const accel = C.acceleration * (this.grounded || this.swimming || this.flying || this.gliding ? 1 : C.airControl);
+    const accel = C.acceleration * (this.grounded || this.swimming || this.flying || this.gliding || mountFlying ? 1 : C.airControl);
     const hv = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
     const dv = target.sub(hv);
     const maxDv = accel * dt;
@@ -233,6 +242,11 @@ export class Player {
       const climb = artsData.flight.climb;
       this.velocity.y = this.controls.down('jump') ? climb : this.controls.down('sprint') ? -climb : 0;
       this.jumpBuffer = 0;
+    } else if (mountFlying && !this.swimming) {
+      const climb = artsData.flight.climb;
+      this.velocity.y = this.controls.down('jump') ? climb : this.controls.down('sprint') ? -climb : 0;
+      this.jumpBuffer = 0;
+      this.gliding = false;
     } else if (this.swimming) {
       // Float with the head above the surface; jump to hop out onto a shore.
       const targetFeet = worldData.seaLevel - C.swim.depth;
@@ -288,6 +302,8 @@ export class Player {
   }
 
   pose(): AvatarPose {
+    // Riders sit still on their mount's back.
+    if (this.mount) return { speed: 0, grounded: true, vy: 0, dodge: 0, swimming: false, blocking: this.blocking };
     return {
       speed: Math.hypot(this.velocity.x, this.velocity.z),
       grounded: this.grounded,

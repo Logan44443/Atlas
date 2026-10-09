@@ -1,0 +1,23 @@
+{
+  "_comment": "Common pets: tamed in the wild (feed, then win the trust game). from = the wild species they come from (data/wildlife.json).",
+  "pets": [
+    {
+      "id": "foxhound", "name": "Fox-hound", "tier": "common", "from": "foxhound", "shape": "quad", "color": "#d0702e", "accent": "#f4e6d2", "scale": 0.75,
+      "element": null, "hp": 160, "hpPerLevel": 14, "speed": 9,
+      "attack": { "kind": "melee", "name": "Snap", "damage": 9, "range": 2.4, "every": 1.4, "windup": 0.3, "knockback": 1 },
+      "perk": "Fast and loyal: snaps at whatever you fight."
+    },
+    {
+      "id": "tortoise", "name": "Shellback Tortoise", "tier": "common", "from": "tortoise", "shape": "turtle", "color": "#6f8f4a", "accent": "#c4a46a", "scale": 0.8,
+      "element": null, "hp": 320, "hpPerLevel": 26, "speed": 7,
+      "attack": { "kind": "slam", "name": "Shell Bash", "damage": 7, "range": 2.6, "radius": 2.6, "every": 2.4, "windup": 0.5, "knockback": 5 },
+      "perk": "Tough: soaks hits and shoves enemies away."
+    },
+    {
+      "id": "lemur", "name": "Glider Lemur", "tier": "common", "from": "lemur", "shape": "quad", "color": "#d8d2c4", "accent": "#5a4e44", "scale": 0.5,
+      "element": null, "hp": 120, "hpPerLevel": 10, "speed": 10,
+      "attack": { "kind": "spit", "name": "Pebble Toss", "damage": 7, "range": 18, "every": 1.6, "windup": 0.3, "speed": 26 },
+      "perk": "Throws pebbles from range and never strays far."
+    }
+  ]
+}

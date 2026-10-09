@@ -34,7 +34,10 @@ const httpServer = http.createServer(async (req, res) => {
   res.end();
 });
 
-const gameServer = new Server({ transport: new WebSocketTransport({ server: httpServer }) });
+// A browser that is busy building the world can be slow to answer pings; give it a while before dropping it.
+const gameServer = new Server({
+  transport: new WebSocketTransport({ server: httpServer, pingInterval: NET.pingIntervalMs, pingMaxRetries: NET.pingMaxRetries }),
+});
 // joinOrCreate fills a shard up to maxClients, then opens a new one.
 gameServer.define(ROOM_NAME, WorldRoom);
 

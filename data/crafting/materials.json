@@ -3,36 +3,178 @@
   "bagCapacity": 120,
   "chestCapacity": 400,
   "materials": [
-    { "id": "wood",        "name": "Wood",        "icon": "🪵" },
-    { "id": "stone",       "name": "Stone",       "icon": "🪨" },
-    { "id": "ore",         "name": "Raw ore",     "icon": "⛏️" },
-    { "id": "sand",        "name": "Sand",        "icon": "⏳" },
-    { "id": "glass",       "name": "Glass",       "icon": "🔷" },
-    { "id": "steam_core",  "name": "Steam core",  "icon": "♨️" },
-    { "id": "refined_ore", "name": "Refined ore", "icon": "🔩" },
-    { "id": "charcoal",    "name": "Charcoal",    "icon": "⚫" },
-    { "id": "mud",         "name": "Mud",         "icon": "🟤" },
-    { "id": "magma_brick", "name": "Magma brick", "icon": "🧱" },
-    { "id": "obsidian",    "name": "Obsidian",    "icon": "🖤" },
-    { "id": "ice_crystal", "name": "Ice crystal", "icon": "❄️" },
-    { "id": "forge_heat",  "name": "Forge heat",  "icon": "🔥" },
-    { "id": "steel_beam",  "name": "Steel beam",  "icon": "🏗️" },
-    { "id": "sandstone",   "name": "Sandstone",   "icon": "🟨" },
-    { "id": "metal_plate", "name": "Metal plate", "icon": "🛡️" }
+    {
+      "id": "wood",
+      "name": "Wood",
+      "icon": "🪵"
+    },
+    {
+      "id": "stone",
+      "name": "Stone",
+      "icon": "🪨"
+    },
+    {
+      "id": "ore",
+      "name": "Raw ore",
+      "icon": "⛏️"
+    },
+    {
+      "id": "sand",
+      "name": "Sand",
+      "icon": "⏳"
+    },
+    {
+      "id": "glass",
+      "name": "Glass",
+      "icon": "🔷"
+    },
+    {
+      "id": "steam_core",
+      "name": "Steam core",
+      "icon": "♨️"
+    },
+    {
+      "id": "refined_ore",
+      "name": "Refined ore",
+      "icon": "🔩"
+    },
+    {
+      "id": "charcoal",
+      "name": "Charcoal",
+      "icon": "⚫"
+    },
+    {
+      "id": "mud",
+      "name": "Mud",
+      "icon": "🟤"
+    },
+    {
+      "id": "magma_brick",
+      "name": "Magma brick",
+      "icon": "🧱"
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian",
+      "icon": "🖤"
+    },
+    {
+      "id": "ice_crystal",
+      "name": "Ice crystal",
+      "icon": "❄️"
+    },
+    {
+      "id": "forge_heat",
+      "name": "Forge heat",
+      "icon": "🔥"
+    },
+    {
+      "id": "steel_beam",
+      "name": "Steel beam",
+      "icon": "🏗️"
+    },
+    {
+      "id": "sandstone",
+      "name": "Sandstone",
+      "icon": "🟨"
+    },
+    {
+      "id": "metal_plate",
+      "name": "Metal plate",
+      "icon": "🛡️"
+    },
+    {
+      "id": "berries",
+      "name": "Berries",
+      "icon": "🫐"
+    },
+    {
+      "id": "meat",
+      "name": "Meat",
+      "icon": "🍖"
+    },
+    {
+      "id": "hide",
+      "name": "Hide",
+      "icon": "🟫"
+    },
+    {
+      "id": "fang",
+      "name": "Fang",
+      "icon": "🦷"
+    },
+    {
+      "id": "spirit_shard",
+      "name": "Spirit shard",
+      "icon": "💠"
+    }
   ],
   "_nodes": "Resource nodes scattered through the world (deterministic per chunk). gather = what interact gives; cooldown is per player per node.",
   "nodes": {
-    "timber":     { "name": "Fallen timber", "gather": { "wood": 3 },  "cooldown": 45 },
-    "boulder":    { "name": "Boulder",       "gather": { "stone": 3 }, "cooldown": 45 },
-    "sand":       { "name": "Sand bank",     "gather": { "sand": 2 },  "cooldown": 45 },
-    "ore_node":   { "name": "Ore vein",      "gather": { "ore": 1 },   "cooldown": 60 },
-    "hot_spring": { "name": "Hot spring",    "gather": null,           "cooldown": 30 },
-    "ash_pile":   { "name": "Ash pile",      "gather": null,           "cooldown": 30 }
+    "timber": {
+      "name": "Fallen timber",
+      "gather": {
+        "wood": 3,
+        "berries": 1
+      },
+      "cooldown": 45
+    },
+    "boulder": {
+      "name": "Boulder",
+      "gather": {
+        "stone": 3
+      },
+      "cooldown": 45
+    },
+    "sand": {
+      "name": "Sand bank",
+      "gather": {
+        "sand": 2
+      },
+      "cooldown": 45
+    },
+    "ore_node": {
+      "name": "Ore vein",
+      "gather": {
+        "ore": 1
+      },
+      "cooldown": 60
+    },
+    "hot_spring": {
+      "name": "Hot spring",
+      "gather": null,
+      "cooldown": 30
+    },
+    "ash_pile": {
+      "name": "Ash pile",
+      "gather": null,
+      "cooldown": 30
+    }
   },
   "_forge": "Recipes made at a placed forge (stand within forgeRange metres).",
   "forgeRange": 6,
   "forge": [
-    { "id": "metal_plate", "name": "Metal plate", "inputs": { "refined_ore": 2, "charcoal": 1 }, "output": { "metal_plate": 1 } },
-    { "id": "steel",       "name": "Steel beam",  "inputs": { "refined_ore": 3, "forge_heat": 1 }, "output": { "steel_beam": 1 } }
+    {
+      "id": "metal_plate",
+      "name": "Metal plate",
+      "inputs": {
+        "refined_ore": 2,
+        "charcoal": 1
+      },
+      "output": {
+        "metal_plate": 1
+      }
+    },
+    {
+      "id": "steel",
+      "name": "Steel beam",
+      "inputs": {
+        "refined_ore": 3,
+        "forge_heat": 1
+      },
+      "output": {
+        "steel_beam": 1
+      }
+    }
   ]
 }

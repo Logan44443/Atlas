@@ -3,7 +3,8 @@
 // panel and the placement ghost, stores items in a chest, makes refined ore at
 // an ore vein (channel key) and mud with a waterbender ally; an outlaw
 // firebender can't hurt the camp outside the raid window but can during it
-// (forced with the dev-only `dev:raid`). The camp and bag survive a reload.
+// (forced with the dev-only `dev:raid`). The camp and bag survive a reload, and a dropped
+// connection rejoins by itself.
 // Offline: a camp saves in the browser and you respawn at your campfire.
 // Needs `npm run server` and `npm run dev`.
 //   node scripts/phase9-test.mjs [url]
@@ -157,7 +158,7 @@ ok((await inv(A)).wood === wood0 - 6, 'the wall cost 6 wood');
 ok((await A.page.evaluate(() => window.__fw.structView.count)) >= 2, 'structures render (meshes + colliders)');
 await goTo(A, site.x + 8, site.z);
 const chest = await buildWithGhost(A, 'chest');
-ok(!!chest.placed, 'chest placed');
+ok(!!chest.placed, `chest placed${chest.placed ? '' : ` (ghost: ${JSON.stringify(chest.ghost)})`}`);
 await A.page.screenshot({ path: `${outDir}/p9-camp.png` });
 
 // Chest: G opens it, store everything, take stone back.
@@ -189,9 +190,31 @@ ok((await inv(A)).mud === 3 && (await inv(B)).mud === 3, 'water + earth channell
 // Raids: an outlaw firebender against the wall.
 const C = await open('C', `char=Ember${run}&el=fire&fac=redfang`);
 const W = wall.placed;
-const standX = W.x - 6;
-await goTo(C, standX, W.z);
+await goTo(C, W.x - 6, W.z);
 await until(C, (id) => window.__fw.host.camps.all.has(id), W.id, 30000).catch(() => {});
+// Stand 6 m from the wall with a clear line of fire: trunks and boulders stop bending,
+// and other camp pieces would take the hits instead.
+const stand = await C.page.evaluate((id) => {
+  const f = window.__fw;
+  const w = f.host.camps.all.get(id);
+  const g = (x, z) => f.sampler.height(x, z);
+  for (let k = 0; k < 16; k++) {
+    const a = Math.PI + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+    const x = w.x + Math.cos(a) * 6;
+    const z = w.z + Math.sin(a) * 6;
+    let clear = Math.abs(g(x, z) - g(w.x, w.z)) < 2;
+    for (let t = 0; t <= 1 && clear; t += 0.05) {
+      const px = x + (w.x - x) * t;
+      const pz = z + (w.z - z) * t;
+      const py = g(x, z) + 1.4 + (w.y + 1.5 - g(x, z) - 1.4) * t;
+      if (f.obstacles.hit(px, py, pz, 0.4)) clear = false;
+      for (const s of f.host.camps.all.values()) if (s.id !== id && Math.hypot(s.x - px, s.z - pz) < 2.5) clear = false;
+    }
+    if (clear) return { x, z };
+  }
+  return { x: w.x - 6, z: w.z };
+}, W.id).catch(() => ({ x: W.x - 6, z: W.z }));
+await goTo(C, stand.x, stand.z);
 ok(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id), 'other players see the camp (streamed structures)');
 const shoot = (n) => C.page.evaluate(async ([id, count]) => {
   const f = window.__fw;
@@ -225,6 +248,13 @@ await A.page.evaluate(() => window.__fw.host.leave());
 await waitSim(B, 3);
 await A.page.close();
 const A2 = await open('A2', `char=Mason${run}&el=earth&fac=sentinel`, A.ctx);
+// Headless with four tabs, a fresh tab can stall long enough for the shard to drop it; it rejoins
+// by itself (checked below with C). Let it settle online before going on.
+const settled = () => A2.page.evaluate(() => window.__fw.host.online && window.__fw.host.connected);
+await until(A2, () => window.__fw.host.online && window.__fw.host.connected, null, 120000).catch(() => {});
+await waitSim(A2, 5);
+await until(A2, () => window.__fw.host.online && window.__fw.host.connected, null, 120000).catch(() => {});
+if (!(await settled())) console.log('  A2 is not back online');
 await until(A2, () => window.__fw.host.camps.campfireOf(window.__fw.host.charId), null, 30000).catch(() => {});
 ok((await myPieces(A2)).length === 3, 'after a reload the camp is still there (3 pieces)');
 const sorted = (o) => JSON.stringify(Object.entries(o).sort());
@@ -233,15 +263,20 @@ ok(sorted(await inv(A2)) === sorted(invBefore), `the bag is saved (${JSON.string
 // Take the wall down: it disappears for everyone, half the cost comes back.
 await goTo(A2, W.x + 2, W.z + 1);
 await A2.page.keyboard.press('KeyB');
-await A2.page.waitForSelector(`.camp:not(.hidden) [data-remove="${W.id}"]`, { timeout: 20000 }).catch(() => {});
+const removeBtn = await A2.page.waitForSelector(`.camp:not(.hidden) [data-remove="${W.id}"]`, { timeout: 20000 }).then(() => true, () => false);
 const w0 = (await inv(A2)).wood ?? 0;
 await A2.page.click(`.camp [data-remove="${W.id}"]`).catch(() => {});
 await until(C, (id) => !window.__fw.host.camps.all.has(id), W.id, 20000).catch(() => {});
-ok(!(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id)), 'taking a piece down removes it for everyone');
+ok(!(await C.page.evaluate((id) => window.__fw.host.camps.all.has(id), W.id)), `taking a piece down removes it for everyone${removeBtn ? '' : ` (no remove button; A2 online: ${await settled()}, net: ${await A2.page.evaluate(() => window.__fw.netStatus)})`}`);
 await until(A2, (n) => (window.__fw.host.progress.inv.wood ?? 0) === n + 3, w0, 10000).catch(() => {});
 ok((await inv(A2)).wood === w0 + 3, 'half the cost is refunded');
+// A dropped connection (closed under the client, not a leave) plays on offline and rejoins by itself.
+const cId = await C.page.evaluate(() => window.__fw.host.me.id);
+await C.page.evaluate(() => window.__fw.host.room.connection.close(4100, 'test drop'));
+await until(C, (id) => window.__fw.host.online && window.__fw.host.me.id !== id, cId, 90000).catch(() => {});
+ok(await C.page.evaluate((id) => window.__fw.host.online && window.__fw.host.me.id !== id, cId), 'a dropped connection rejoins the shard by itself');
 // Leave the world as we found it so later runs find free sites.
-await A2.page.evaluate(() => window.__fw.host.devClearCamp());
+await A2.page.evaluate(() => window.__fw.host.devClearCamp?.());
 await until(C, () => !window.__fw.host.camps.all.size, null, 20000).catch(() => {});
 for (const p of [A2, B, C]) ok(p.errors.length === 0, `${p.label}: no page errors${p.errors.length ? `: ${p.errors.slice(0, 3).join(' | ')}` : ''}`);
 for (const ctx of new Set([A.ctx, B.ctx, C.ctx])) await ctx.close();

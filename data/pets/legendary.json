@@ -1,0 +1,33 @@
+{
+  "_comment": "Legendary pets: beat their world boss (party or raid), get a small chance at the Bond Trial (data/bosses.json bond), and win the solo trial. Only players of the same element can bond. aura = +element power while it is out. mount.fly lets you fly while riding (and bend from its back).",
+  "pets": [
+    {
+      "id": "sun_dragon", "name": "Sun Dragon", "tier": "legendary", "from": "sun_dragon", "shape": "dragon", "color": "#c8381f", "accent": "#ffcf5a", "scale": 1.3,
+      "element": "fire", "hp": 600, "hpPerLevel": 40, "speed": 12, "aura": 0.15, "lightningCharge": 0.7,
+      "attack": { "kind": "cone", "name": "Dragon Fire", "damage": 9, "range": 12, "angle": 40, "duration": 1.2, "tick": 0.3, "every": 3.2, "windup": 0.4, "status": { "type": "burn", "duration": 2, "dps": 4 } },
+      "mount": { "speed": 1.5, "fly": true },
+      "perk": "+15% fire power, lightning charges 30% faster, and you can fly on its back while bending."
+    },
+    {
+      "id": "cloud_bison", "name": "Cloud Bison", "tier": "legendary", "from": "cloud_bison", "shape": "bison", "color": "#f2ece0", "accent": "#7a5b3a", "scale": 1.2,
+      "element": "air", "hp": 760, "hpPerLevel": 50, "speed": 11, "aura": 0.15,
+      "attack": { "kind": "slam", "name": "Tail Gust", "damage": 10, "range": 3, "radius": 4, "every": 2.8, "windup": 0.5, "knockback": 9 },
+      "mount": { "speed": 1.45, "fly": true },
+      "perk": "+15% air power and a flying mount."
+    },
+    {
+      "id": "tide_serpent", "name": "Tide Serpent", "tier": "legendary", "from": "tide_serpent", "shape": "serpent", "color": "#1f6f8f", "accent": "#bff3ff", "scale": 1.4,
+      "element": "water", "hp": 640, "hpPerLevel": 44, "speed": 11, "aura": 0.15,
+      "attack": { "kind": "spit", "name": "Tide Lance", "damage": 15, "range": 24, "every": 1.8, "windup": 0.3, "speed": 30, "status": { "type": "slow", "duration": 2, "amount": 0.3 } },
+      "mount": { "speed": 1.4, "swim": 2.6 },
+      "perk": "+15% water power; ride it to cross the sea fast."
+    },
+    {
+      "id": "burrow_titan", "name": "Burrow Titan", "tier": "legendary", "from": "burrow_titan", "shape": "titan", "color": "#7a6248", "accent": "#d7b56d", "scale": 1.1,
+      "element": "earth", "hp": 900, "hpPerLevel": 60, "speed": 9.5, "aura": 0.15,
+      "attack": { "kind": "slam", "name": "Quake Paw", "damage": 13, "range": 3, "radius": 4, "every": 2.6, "windup": 0.5, "knockback": 7, "status": { "type": "stagger", "duration": 0.6 } },
+      "mount": { "speed": 1.4 },
+      "perk": "+15% earth power; an armoured mount that staggers foes."
+    }
+  ]
+}

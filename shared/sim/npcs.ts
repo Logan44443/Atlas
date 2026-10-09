@@ -8,7 +8,7 @@ import { CombatSim, createEntity, center, canHarm, KITS, type SimEntity } from '
 import type { ElementId, Slot } from '../combat';
 import { ARTS, masterId } from '../arts';
 
-export type NpcRole = 'vendor' | 'trainer' | 'quest' | 'guard' | 'fighter' | 'master';
+export type NpcRole = 'vendor' | 'trainer' | 'quest' | 'beast' | 'guard' | 'fighter' | 'master';
 
 export interface NpcBrain {
   entity: SimEntity;
@@ -163,7 +163,7 @@ function think(b: NpcBrain, sim: CombatSim): void {
   const cur = b.target ? sim.entities.get(b.target) : undefined;
   if (cur && !cur.dead && canHarm(e, cur, sim.time) && cur.pos.distanceTo(e.pos) < NPC_CFG.leashRange) return;
   b.target = null;
-  if (b.role === 'vendor' || b.role === 'trainer' || b.role === 'quest' || b.role === 'master') return;
+  if (b.role === 'vendor' || b.role === 'trainer' || b.role === 'quest' || b.role === 'beast' || b.role === 'master') return;
   let best = Infinity;
   for (const o of sim.entities.values()) {
     if (o.dead || o.kind === 'dummy' || !canHarm(e, o, sim.time)) continue;

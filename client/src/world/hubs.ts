@@ -112,8 +112,8 @@ function buildHub(f: Faction, groundY: number): { geo: THREE.BufferGeometry | nu
     lanterns.push(new THREE.Vector3(x + dx * 1.15 + Math.cos(yaw) * 1.2, y0 + 2.8, z + dz * 1.15 - Math.sin(yaw) * 1.2));
   }
 
-  // Market stalls for the vendor / trainer / envoy.
-  for (const [sx, sz] of [[-10, 9], [10, 9], [0, -11]]) {
+  // Market stalls for the vendor / trainer / envoy / beastkeeper.
+  for (const [sx, sz] of [[-10, 9], [10, 9], [0, -11], [-17, -7]]) {
     b.box(s.wood, sx, y0, sz, 3.4, 1.0, 1.2, 0);
     b.add(ROOF4, f.color, sx, y0 + 3.0, sz, 0, 4.4, 0.9, 2.6);
     for (const px of [-1.5, 1.5]) b.add(CYL, s.wood, sx + px, y0 + 1.3, sz - 0.4, 0, 0.12, 2.6, 0.12);
